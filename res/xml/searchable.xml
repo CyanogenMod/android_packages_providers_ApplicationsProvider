@@ -17,6 +17,7 @@
 <searchable xmlns:android="http://schemas.android.com/apk/res/android"
     android:icon="@android:drawable/sym_def_app_icon"
     android:label="@string/search_label"
+    android:includeInGlobalSearch="true"
     android:searchMode="showSearchLabelAsBadge"
     android:searchSuggestAuthority="applications"
     android:searchSuggestIntentAction="android.intent.action.MAIN"
