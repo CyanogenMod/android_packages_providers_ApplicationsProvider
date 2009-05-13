@@ -120,7 +120,8 @@ public class ApplicationsProvider extends ContentProvider {
         // Maps token from the app name to records in the applications table
         mDb.execSQL("CREATE TABLE applicationsLookup (" +
                 "token TEXT," +
-                "source INTEGER REFERENCES " + APPLICATIONS_TABLE + "(" + _ID + ")" +
+                "source INTEGER REFERENCES " + APPLICATIONS_TABLE + "(" + _ID + ")," +
+                "token_index INTEGER" +
                 ");");
         mDb.execSQL("CREATE INDEX applicationsLookupIndex ON applicationsLookup (" +
                 "token," +
@@ -131,12 +132,12 @@ public class ApplicationsProvider extends ContentProvider {
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
                 "DELETE FROM applicationsLookup WHERE source = new." + _ID + ";" +
-                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ');" +
+                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
                 "END");
         mDb.execSQL("CREATE TRIGGER applicationsLookup_insert AFTER INSERT ON " + 
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
-                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ');" +
+                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
                 "END");
         mDb.execSQL("CREATE TRIGGER applicationsLookup_delete DELETE ON " + 
                 APPLICATIONS_TABLE + " " +
