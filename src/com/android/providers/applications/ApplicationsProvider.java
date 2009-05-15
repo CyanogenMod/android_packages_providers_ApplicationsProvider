@@ -180,38 +180,50 @@ public class ApplicationsProvider extends ContentProvider {
             throw new IllegalArgumentException("Unknown URL " + uri);
         }
 
+        if (!TextUtils.isEmpty(selection)) {
+            throw new IllegalArgumentException("selection not allowed for " + uri);
+        }
+        if (selectionArgs != null && selectionArgs.length != 0) {
+            throw new IllegalArgumentException("selectionArgs not allowed for " + uri);
+        }
+        if (!TextUtils.isEmpty(sortOrder)) {
+            throw new IllegalArgumentException("sortOrder not allowed for " + uri);
+        }
+
         // Get the search text
         String query = null;
         if (uri.getPathSegments().size() > 1) {
             query = uri.getLastPathSegment().toLowerCase();
         }
+        // No zero-query suggestions
         if (TextUtils.isEmpty(query)) {
             return null;
         }
 
         // Build SQL query
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
-        qb.setTables(APPLICATIONS_TABLE);
+        qb.setTables("applicationsLookup JOIN " + APPLICATIONS_TABLE + " ON"
+                + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID);
         qb.setProjectionMap(sSearchSuggestionsProjectionMap);
-        qb.appendWhere(buildApplicationsLookupWhereClause(query));
-        
+        qb.appendWhere(buildTokenFilter(query));
+        // order first by whether it a full prefix match, then by name
+        // token_index != 0 is true for non-full prefix matches,
+        // and since false (0) < true(1), this expression makes sure
+        // that full prefix matches come first.
+        String order = "token_index != 0, " + NAME;
         Cursor cursor = qb.query(mDb, projectionIn, selection, selectionArgs,
-                null, null, sortOrder);
+                null, null, order);
         return cursor;
     }
     
-    // Stolen from ContactsProvider.buildPeopleLookupWhereClause(String)
     @SuppressWarnings("deprecation")
-    private String buildApplicationsLookupWhereClause(String filterParam) {
-        StringBuilder filter = new StringBuilder(
-                APPLICATIONS_TABLE + "." + _ID + 
-                " IN (SELECT source FROM applicationsLookup WHERE token GLOB ");
+    private String buildTokenFilter(String filterParam) {
+        StringBuilder filter = new StringBuilder("token GLOB ");
         // NOTE: Query parameters won't work here since the SQL compiler
         // needs to parse the actual string to know that it can use the
         // index to do a prefix scan.
         DatabaseUtils.appendEscapedSQLString(filter, 
                 DatabaseUtils.getHexCollationKey(filterParam) + "*");
-        filter.append(')');
         return filter.toString();
     }
     
