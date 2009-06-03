@@ -17,7 +17,7 @@
 
 
     <!-- Search label for applications. -->
-    <string name="search_label">Applications</string>
+    <string name="search_label">Apps</string>
 
     <!-- Description line displayed for an application entry in the search suggest list. -->
     <string name="application_desc">Application</string>
