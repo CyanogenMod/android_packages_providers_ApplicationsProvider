@@ -206,13 +206,15 @@ public class ApplicationsProvider extends ContentProvider {
                 + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID);
         qb.setProjectionMap(sSearchSuggestionsProjectionMap);
         qb.appendWhere(buildTokenFilter(query));
+        // don't return duplicates when there are two matching tokens for an app
+        String groupBy = APPLICATIONS_TABLE + "." + _ID;
         // order first by whether it a full prefix match, then by name
-        // token_index != 0 is true for non-full prefix matches,
+        // MIN(token_index) != 0 is true for non-full prefix matches,
         // and since false (0) < true(1), this expression makes sure
         // that full prefix matches come first.
-        String order = "token_index != 0, " + NAME;
+        String order = "MIN(token_index) != 0, " + NAME;
         Cursor cursor = qb.query(mDb, projectionIn, selection, selectionArgs,
-                null, null, order);
+                groupBy, null, order);
         return cursor;
     }
     
