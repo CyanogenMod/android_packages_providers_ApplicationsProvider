@@ -21,5 +21,6 @@
     android:searchMode="showSearchLabelAsBadge"
     android:searchSuggestAuthority="applications"
     android:searchSuggestIntentAction="android.intent.action.MAIN"
+    android:searchSettingsDescription="@string/settings_description"
 >
 </searchable>
