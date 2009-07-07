@@ -274,12 +274,19 @@ public class ApplicationsProvider extends ContentProvider {
                 if (TextUtils.isEmpty(title)) {
                     title = info.activityInfo.name;
                 }
-                // Use a resource Uri for the icon.
-                String icon = new Uri.Builder()
-                        .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
-                        .authority(info.activityInfo.applicationInfo.packageName)
-                        .encodedPath(String.valueOf(info.activityInfo.getIconResource()))
-                        .toString();
+                
+                String icon;
+                if (info.activityInfo.getIconResource() != 0) {
+                    // Use a resource Uri for the icon.
+                    icon = new Uri.Builder()
+                            .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
+                            .authority(info.activityInfo.applicationInfo.packageName)
+                            .encodedPath(String.valueOf(info.activityInfo.getIconResource()))
+                            .toString();
+                } else {
+                    // No icon for app, use default app icon.
+                    icon = String.valueOf(com.android.internal.R.drawable.sym_def_app_icon);
+                }
                 inserter.prepareForInsert();
                 inserter.bind(nameCol, title);
                 inserter.bind(descriptionCol, description);
