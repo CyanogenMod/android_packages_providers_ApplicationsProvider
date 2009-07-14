@@ -51,16 +51,10 @@ public class ApplicationsProvider extends ContentProvider {
     
     private static final String TAG = "ApplicationsProvider";
 
-    private static final UriMatcher sURIMatcher = new UriMatcher(UriMatcher.NO_MATCH);
     private static final int SEARCH_SUGGEST = 0;
-    
-    static {
-        sURIMatcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_QUERY,
-                SEARCH_SUGGEST);
-        sURIMatcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_QUERY + "/*",
-                SEARCH_SUGGEST);
-    };
-    
+    private static final int SHORTCUT_REFRESH = 1;
+    private static final UriMatcher sURIMatcher = buildUriMatcher();
+
     // TODO: Move these to android.provider.Applications?
     public static final String _ID = "_id";
     public static final String NAME = "name";
@@ -75,6 +69,19 @@ public class ApplicationsProvider extends ContentProvider {
             buildSuggestionsProjectionMap();
     
     private SQLiteDatabase mDb;
+
+    private static UriMatcher buildUriMatcher() {
+        UriMatcher matcher =  new UriMatcher(UriMatcher.NO_MATCH);
+        matcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_QUERY,
+                SEARCH_SUGGEST);
+        matcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_QUERY + "/*",
+                SEARCH_SUGGEST);
+        matcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_SHORTCUT,
+                SHORTCUT_REFRESH);
+        matcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_SHORTCUT + "/*",
+                SHORTCUT_REFRESH);
+        return matcher;
+    }
 
     // Broadcast receiver for updating applications list.
     private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
@@ -175,10 +182,7 @@ public class ApplicationsProvider extends ContentProvider {
     @Override
     public Cursor query(Uri uri, String[] projectionIn, String selection,
             String[] selectionArgs, String sortOrder) {
-
-        if (sURIMatcher.match(uri) != SEARCH_SUGGEST) {
-            throw new IllegalArgumentException("Unknown URL " + uri);
-        }
+        if (DBG) Log.d(TAG, "query(" + uri + ")");
 
         if (!TextUtils.isEmpty(selection)) {
             throw new IllegalArgumentException("selection not allowed for " + uri);
@@ -190,11 +194,25 @@ public class ApplicationsProvider extends ContentProvider {
             throw new IllegalArgumentException("sortOrder not allowed for " + uri);
         }
 
-        // Get the search text
-        String query = null;
-        if (uri.getPathSegments().size() > 1) {
-            query = uri.getLastPathSegment().toLowerCase();
+        switch (sURIMatcher.match(uri)) {
+            case SEARCH_SUGGEST:
+                String query = null;
+                if (uri.getPathSegments().size() > 1) {
+                    query = uri.getLastPathSegment().toLowerCase();
+                }
+                return getSuggestions(query, projectionIn);
+            case SHORTCUT_REFRESH:
+                String shortcutId = null;
+                if (uri.getPathSegments().size() > 1) {
+                    shortcutId = uri.getLastPathSegment();
+                }
+                return refreshShortcut(shortcutId, projectionIn);
+            default:
+                throw new IllegalArgumentException("Unknown URL " + uri);
         }
+    }
+
+    private Cursor getSuggestions(String query, String[] projectionIn) {
         // No zero-query suggestions
         if (TextUtils.isEmpty(query)) {
             return null;
@@ -213,11 +231,32 @@ public class ApplicationsProvider extends ContentProvider {
         // and since false (0) < true(1), this expression makes sure
         // that full prefix matches come first.
         String order = "MIN(token_index) != 0, " + NAME;
-        Cursor cursor = qb.query(mDb, projectionIn, selection, selectionArgs,
-                groupBy, null, order);
+        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, order);
+        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
         return cursor;
     }
-    
+
+    /**
+     * Refreshes the shortcut of an application.
+     *
+     * @param shortcutId Flattened component name of an activity.
+     */
+    private Cursor refreshShortcut(String shortcutId, String[] projectionIn) {
+        ComponentName component = ComponentName.unflattenFromString(shortcutId);
+        if (component == null) {
+            Log.w(TAG, "Bad shortcut id: " + shortcutId);
+            return null;
+        }
+        SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
+        qb.setTables(APPLICATIONS_TABLE);
+        qb.setProjectionMap(sSearchSuggestionsProjectionMap);
+        qb.appendWhere("package = ? AND class = ?");
+        String[] selectionArgs = { component.getPackageName(), component.getClassName() };
+        Cursor cursor = qb.query(mDb, projectionIn, null, selectionArgs, null, null, null);
+        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for shortcut refresh.");
+        return cursor;
+    }
+
     @SuppressWarnings("deprecation")
     private String buildTokenFilter(String filterParam) {
         StringBuilder filter = new StringBuilder("token GLOB ");
@@ -244,6 +283,9 @@ public class ApplicationsProvider extends ContentProvider {
                 ICON + " AS " + SearchManager.SUGGEST_COLUMN_ICON_1);
         map.put(SearchManager.SUGGEST_COLUMN_ICON_2,
                 "NULL AS " + SearchManager.SUGGEST_COLUMN_ICON_2);
+        map.put(SearchManager.SUGGEST_COLUMN_SHORTCUT_ID,
+                PACKAGE + " || '/' || " + CLASS + " AS "
+                + SearchManager.SUGGEST_COLUMN_SHORTCUT_ID);
         return map;
     }
     
