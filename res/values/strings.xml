@@ -23,6 +23,6 @@
     
     <!-- Description line displayed for 'apps' as a searchable item within system search
          settings. -->
-    <string name="settings_description">Installed applications</string>
+    <string name="settings_description">Names of installed applications</string>
 
 </resources>
