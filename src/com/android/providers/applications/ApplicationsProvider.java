@@ -38,14 +38,25 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import java.util.HashMap;
+import java.util.LinkedList;
 import java.util.List;
+import java.util.concurrent.Executor;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Fetches the list of applications installed on the phone to provide search suggestions.
  * If the functionality of this provider changes, the documentation at
  * {@link android.provider.Applications} should be updated.
+ *
+ * TODO: this provider should be moved to the Launcher, which contains similar logic to keep an up
+ * to date list of installed applications.  Alternatively, Launcher could be updated to use this 
+ * provider.
  */
-public class ApplicationsProvider extends ContentProvider {
+public class ApplicationsProvider extends ContentProvider implements ThreadFactory {
     
     private static final boolean DBG = false;
     
@@ -69,6 +80,18 @@ public class ApplicationsProvider extends ContentProvider {
             buildSuggestionsProjectionMap();
     
     private SQLiteDatabase mDb;
+    private final AtomicInteger mThreadCount = new AtomicInteger(1);
+    private Executor mExecutor;
+
+    // mQLock protects access to the list of pending updates
+    private final Object mQLock = new Object();
+    private final LinkedList<UpdateRunnable> mPending = new LinkedList<UpdateRunnable>();
+
+    /**
+     * We delay application updates by this many millis to avoid doing more than one update to the
+     * applications list within this window.
+     */
+    private static final long UPDATE_DELAY_MILLIS = 1000L;
 
     private static UriMatcher buildUriMatcher() {
         UriMatcher matcher =  new UriMatcher(UriMatcher.NO_MATCH);
@@ -91,23 +114,113 @@ public class ApplicationsProvider extends ContentProvider {
             if (Intent.ACTION_PACKAGE_ADDED.equals(action)
                     || Intent.ACTION_PACKAGE_REMOVED.equals(action)
                     || Intent.ACTION_PACKAGE_CHANGED.equals(action)) {
-                // TODO: Instead of rebuilding the whole list on every change,
-                // just add, remove or update the application that has changed.
-                // Adding and updating seem tricky, since I can't see an easy way to list the
-                // launchable activities in a given package.
-                updateApplicationsList();
+                // do this in a worker thread to avoid ANRs
+                if (DBG) Log.d(TAG, "package update: " + intent);
+                postAppsUpdate();
             }
         }
     };
-    
+
     @Override
     public boolean onCreate() {
         createDatabase();
         registerBroadcastReceiver();
         updateApplicationsList();
+        mExecutor = new ThreadPoolExecutor(1, 1,
+                5, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<Runnable>(),
+                this);
         return true;
     }
-    
+
+    // ----------
+    // BEGIN ASYC UPDATE CODE
+    // - only one update at a time
+    // - cancel any outstanding updates when a new one comes in so they become no-ops
+    // ----------
+
+    /**
+     * {@inheritDoc}
+     */
+    public Thread newThread(Runnable r) {
+        return new WorkerThread(r, "ApplicationsProvider #" + mThreadCount.getAndIncrement());
+    }
+
+    // a thread that runs with background priority
+    private static class WorkerThread extends Thread {
+
+        private WorkerThread(Runnable runnable, String threadName) {
+            super(runnable, threadName);
+        }
+
+        @Override
+        public void run() {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
+            super.run();
+        }
+    }
+
+    /**
+     * Post an update, and add it to the pending queue.  Cancel any other pending operatinos.
+     */
+    private void postAppsUpdate() {
+        final UpdateRunnable r = new UpdateRunnable();
+        synchronized (mQLock) {
+            for (UpdateRunnable updateRunnable : mPending) {
+                updateRunnable.cancel();
+            }
+            mPending.add(r);
+        }
+        mExecutor.execute(r);
+    }
+
+    private void doneRunning(UpdateRunnable runnable) {
+        synchronized (mQLock) {
+            mPending.remove(runnable);
+        }
+    }
+
+    /**
+     * Updates the applications list, unless it was cancelled.  When done, calls back to
+     * {@link ApplicationsProvider#doneRunning} do be removed from pending queue.
+     */
+    class UpdateRunnable implements Runnable {
+
+        private volatile boolean mCancelled = false;
+
+        void cancel() {
+            mCancelled = true;
+        }
+
+        public void run() {
+
+            try {
+                Thread.sleep(UPDATE_DELAY_MILLIS);
+            } catch (InterruptedException e) {
+                // not expected, but meh
+                mCancelled = true;
+            }
+
+            try {
+                if (!mCancelled) {
+                    updateApplicationsList();
+                } else if (DBG) {
+                    Log.d(TAG, "avoided applications update.");
+
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "error updating applications list.", e);
+            } finally {
+                doneRunning(this);
+            }
+        }
+    }
+
+    // ----------
+    // END ASYC UPDATE CODE
+    // ----------
+
+
     /**
      * Creates an in-memory database for storing application info.
      */
@@ -288,11 +401,15 @@ public class ApplicationsProvider extends ContentProvider {
                 + SearchManager.SUGGEST_COLUMN_SHORTCUT_ID);
         return map;
     }
-    
+
     /**
      * Updates the cached list of installed applications.
      */
     private void updateApplicationsList() {
+        // TODO: Instead of rebuilding the whole list on every change,
+        // just add, remove or update the application that has changed.
+        // Adding and updating seem tricky, since I can't see an easy way to list the
+        // launchable activities in a given package.
         if (DBG) Log.d(TAG, "Updating database...");
         
         DatabaseUtils.InsertHelper inserter = 
