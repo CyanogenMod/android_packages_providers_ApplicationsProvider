@@ -125,11 +125,11 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
     public boolean onCreate() {
         createDatabase();
         registerBroadcastReceiver();
-        updateApplicationsList();
         mExecutor = new ThreadPoolExecutor(1, 1,
                 5, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<Runnable>(),
                 this);
+        postAppsUpdate();
         return true;
     }
 
