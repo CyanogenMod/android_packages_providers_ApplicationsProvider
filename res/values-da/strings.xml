@@ -15,7 +15,7 @@
 -->
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <string name="search_label" msgid="6182832093760999173">"Google Apps"</string>
-    <string name="application_desc" msgid="888412554142684749">"Anwendung"</string>
-    <string name="settings_description" msgid="966629744054022387">"Namen der installierten Anwendungen"</string>
+    <string name="search_label" msgid="6182832093760999173">"Apps"</string>
+    <string name="application_desc" msgid="888412554142684749">"Program"</string>
+    <string name="settings_description" msgid="966629744054022387">"Navne på installerede programmer"</string>
 </resources>
