@@ -285,7 +285,14 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
      */
     @Override
     public String getType(Uri uri) {
-        return SearchManager.SUGGEST_MIME_TYPE;
+        switch (sURIMatcher.match(uri)) {
+            case SEARCH_SUGGEST:
+                return SearchManager.SUGGEST_MIME_TYPE;
+            case SHORTCUT_REFRESH:
+                return SearchManager.SHORTCUT_MIME_TYPE;
+            default:
+                throw new IllegalArgumentException("Unknown URL " + uri);
+        }
     }
 
     /**

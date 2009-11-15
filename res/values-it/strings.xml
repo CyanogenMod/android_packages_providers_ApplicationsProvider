@@ -15,8 +15,7 @@
 -->
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <string name="search_label">"Applicazioni"</string>
-    <string name="application_desc">"Applicazione"</string>
-    <!-- no translation found for settings_description (8483127270107170025) -->
-    <skip />
+    <string name="search_label" msgid="6182832093760999173">"Applicazioni"</string>
+    <string name="application_desc" msgid="888412554142684749">"Applicazione"</string>
+    <string name="settings_description" msgid="966629744054022387">"Nomi delle applicazioni installate"</string>
 </resources>
