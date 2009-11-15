@@ -33,19 +33,16 @@ import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.Looper;
+import android.os.Message;
 import android.provider.Applications;
 import android.text.TextUtils;
 import android.util.Log;
 
 import java.util.HashMap;
-import java.util.LinkedList;
 import java.util.List;
-import java.util.concurrent.Executor;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Fetches the list of applications installed on the phone to provide search suggestions.
@@ -56,15 +53,21 @@ import java.util.concurrent.atomic.AtomicInteger;
  * to date list of installed applications.  Alternatively, Launcher could be updated to use this 
  * provider.
  */
-public class ApplicationsProvider extends ContentProvider implements ThreadFactory {
-    
+public class ApplicationsProvider extends ContentProvider {
+
     private static final boolean DBG = false;
-    
+
     private static final String TAG = "ApplicationsProvider";
 
     private static final int SEARCH_SUGGEST = 0;
     private static final int SHORTCUT_REFRESH = 1;
     private static final UriMatcher sURIMatcher = buildUriMatcher();
+
+    private static final int THREAD_PRIORITY = android.os.Process.THREAD_PRIORITY_BACKGROUND;
+
+    // Messages for mHandler
+    private static final int MSG_UPDATE = 0;
+    private static final int MSG_REMOVE = 1;
 
     // TODO: Move these to android.provider.Applications?
     public static final String _ID = "_id";
@@ -80,12 +83,9 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
             buildSuggestionsProjectionMap();
     
     private SQLiteDatabase mDb;
-    private final AtomicInteger mThreadCount = new AtomicInteger(1);
-    private Executor mExecutor;
+    // Handler that runs DB updates.
+    private Handler mHandler;
 
-    // mQLock protects access to the list of pending updates
-    private final Object mQLock = new Object();
-    private final LinkedList<UpdateRunnable> mPending = new LinkedList<UpdateRunnable>();
 
     /**
      * We delay application updates by this many millis to avoid doing more than one update to the
@@ -112,108 +112,95 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
             if (Intent.ACTION_PACKAGE_ADDED.equals(action)
-                    || Intent.ACTION_PACKAGE_REMOVED.equals(action)
                     || Intent.ACTION_PACKAGE_CHANGED.equals(action)) {
-                // do this in a worker thread to avoid ANRs
-                if (DBG) Log.d(TAG, "package update: " + intent);
-                postAppsUpdate();
+                if (DBG) Log.d(TAG, "package added/updated: " + intent);
+                String packageName = getPackageName(intent);
+                postAppsUpdate(packageName);
+            } else if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
+                if (DBG) Log.d(TAG, "package removed: " + intent);
+                String packageName = getPackageName(intent);
+                postAppsRemove(packageName);
             }
         }
     };
+
+    /**
+     * Gets the package name from an {@link Intent.ACTION_PACKAGE_ADDED},
+     * {@link Intent.ACTION_PACKAGE_CHANGED}, or {@link Intent.ACTION_PACKAGE_REMOVED}
+     * intent.
+     *
+     * @param intent
+     * @return The package name, or {@code null} if none.
+     */
+    private String getPackageName(Intent intent) {
+        Uri data = intent.getData();
+        if (data == null) {
+            Log.e(TAG, "Got intent " + intent + " with no data.");
+            return null;
+        }
+        String packageName = data.getSchemeSpecificPart();
+        if (packageName == null) {
+            Log.e(TAG, "No package name in "  + intent);
+            return null;
+        }
+        return packageName;
+    }
 
     @Override
     public boolean onCreate() {
         createDatabase();
         registerBroadcastReceiver();
-        mExecutor = new ThreadPoolExecutor(1, 1,
-                5, TimeUnit.SECONDS,
-                new LinkedBlockingQueue<Runnable>(),
-                this);
-        postAppsUpdate();
+        HandlerThread thread = new HandlerThread("ApplicationsProviderUpdater", THREAD_PRIORITY);
+        thread.start();
+        mHandler = new UpdateHandler(thread.getLooper());
+        postAppsUpdate(null);
         return true;
     }
 
-    // ----------
-    // BEGIN ASYC UPDATE CODE
-    // - only one update at a time
-    // - cancel any outstanding updates when a new one comes in so they become no-ops
-    // ----------
+    private class UpdateHandler extends Handler {
 
-    /**
-     * {@inheritDoc}
-     */
-    public Thread newThread(Runnable r) {
-        return new WorkerThread(r, "ApplicationsProvider #" + mThreadCount.getAndIncrement());
-    }
-
-    // a thread that runs with background priority
-    private static class WorkerThread extends Thread {
-
-        private WorkerThread(Runnable runnable, String threadName) {
-            super(runnable, threadName);
+        public UpdateHandler(Looper looper) {
+            super(looper);
         }
 
         @Override
-        public void run() {
-            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND);
-            super.run();
-        }
-    }
-
-    /**
-     * Post an update, and add it to the pending queue.  Cancel any other pending operatinos.
-     */
-    private void postAppsUpdate() {
-        final UpdateRunnable r = new UpdateRunnable();
-        synchronized (mQLock) {
-            for (UpdateRunnable updateRunnable : mPending) {
-                updateRunnable.cancel();
-            }
-            mPending.add(r);
-        }
-        mExecutor.execute(r);
-    }
-
-    private void doneRunning(UpdateRunnable runnable) {
-        synchronized (mQLock) {
-            mPending.remove(runnable);
-        }
-    }
-
-    /**
-     * Updates the applications list, unless it was cancelled.  When done, calls back to
-     * {@link ApplicationsProvider#doneRunning} do be removed from pending queue.
-     */
-    class UpdateRunnable implements Runnable {
-
-        private volatile boolean mCancelled = false;
-
-        void cancel() {
-            mCancelled = true;
-        }
-
-        public void run() {
-
-            try {
-                Thread.sleep(UPDATE_DELAY_MILLIS);
-            } catch (InterruptedException e) {
-                // not expected, but meh
-                mCancelled = true;
-            }
-
-            try {
-                if (!mCancelled) {
-                    updateApplicationsList();
-                } else if (DBG) {
-                    Log.d(TAG, "avoided applications update.");
-
+        public void handleMessage(Message msg) {
+            switch (msg.what) {
+                case MSG_UPDATE: {
+                    String packageName = (String) msg.obj;
+                    updateApplicationsList(packageName);
+                    break;
                 }
-            } catch (Exception e) {
-                Log.e(TAG, "error updating applications list.", e);
-            } finally {
-                doneRunning(this);
+                case MSG_REMOVE: {
+                    String packageName = (String) msg.obj;
+                    removeApplications(packageName);
+                    break;
+                }
+                default:
+                    Log.e(TAG, "Unknown message: " + msg.what);
+                    break;
             }
         }
+    }
+
+    /**
+     * Posts an update to run on the DB update thread.
+     *
+     * @param packageName Name of package whose activities to update.
+     *        If {@code null}, all packages are updated.
+     */
+    private void postAppsUpdate(String packageName) {
+        Message msg = Message.obtain();
+        msg.what = MSG_UPDATE;
+        msg.obj = packageName;
+        mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
+    }
+
+    private void postAppsRemove(String packageName) {
+        Message msg = Message.obtain();
+        msg.what = MSG_REMOVE;
+        msg.obj = packageName;
+        mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
     }
 
     // ----------
@@ -411,13 +398,12 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
 
     /**
      * Updates the cached list of installed applications.
+     *
+     * @param packageName Name of package whose activities to update.
+     *        If {@code null}, all packages are updated.
      */
-    private void updateApplicationsList() {
-        // TODO: Instead of rebuilding the whole list on every change,
-        // just add, remove or update the application that has changed.
-        // Adding and updating seem tricky, since I can't see an easy way to list the
-        // launchable activities in a given package.
-        if (DBG) Log.d(TAG, "Updating database...");
+    private void updateApplicationsList(String packageName) {
+        if (DBG) Log.d(TAG, "Updating database (packageName = " + packageName + ")...");
         
         DatabaseUtils.InsertHelper inserter = 
                 new DatabaseUtils.InsertHelper(mDb, APPLICATIONS_TABLE);
@@ -426,16 +412,23 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
         int packageCol = inserter.getColumnIndex(PACKAGE);
         int classCol = inserter.getColumnIndex(CLASS);
         int iconCol = inserter.getColumnIndex(ICON);
-        
+
         mDb.beginTransaction();
         try {
-            mDb.execSQL("DELETE FROM " + APPLICATIONS_TABLE);
+            removeApplications(packageName);
             String description = getContext().getString(R.string.application_desc);
             // Iterate and find all the activities which have the LAUNCHER category set.
             Intent mainIntent = new Intent(Intent.ACTION_MAIN, null);
             mainIntent.addCategory(Intent.CATEGORY_LAUNCHER);
+            if (packageName != null) {
+                // Limit to activities in the package, if given
+                mainIntent.setPackage(packageName);
+            }
             final PackageManager manager = getContext().getPackageManager();
-            for (ResolveInfo info : manager.queryIntentActivities(mainIntent, 0)) {
+            List<ResolveInfo> activities = manager.queryIntentActivities(mainIntent, 0);
+            int activityCount = activities == null ? 0 : activities.size();
+            for (int i = 0; i < activityCount; i++) {
+                ResolveInfo info = activities.get(i);
                 String title = info.loadLabel(manager).toString();
                 if (TextUtils.isEmpty(title)) {
                     title = info.activityInfo.name;
@@ -468,7 +461,15 @@ public class ApplicationsProvider extends ContentProvider implements ThreadFacto
         if (DBG) Log.d(TAG, "Finished updating database.");
     }
 
-    
+    private void removeApplications(String packageName) {
+        if (packageName == null) {
+            mDb.delete(APPLICATIONS_TABLE, null, null);
+        } else {
+            mDb.delete(APPLICATIONS_TABLE, PACKAGE + " = ?", new String[] { packageName });
+        }
+
+    }
+
     @Override
     public Uri insert(Uri uri, ContentValues values) {
         throw new UnsupportedOperationException();
