@@ -120,13 +120,16 @@ public class ApplicationsProvider extends ContentProvider {
                 if (DBG) Log.d(TAG, "package removed: " + intent);
                 String packageName = getPackageName(intent);
                 postAppsRemove(packageName);
+            } else if (Intent.ACTION_LOCALE_CHANGED.equals(action)) {
+                if (DBG) Log.d(TAG, "locale changed");
+                postAppsUpdate(null);
             }
         }
     };
 
     /**
-     * Gets the package name from an {@link Intent.ACTION_PACKAGE_ADDED},
-     * {@link Intent.ACTION_PACKAGE_CHANGED}, or {@link Intent.ACTION_PACKAGE_REMOVED}
+     * Gets the package name from an {@link Intent#ACTION_PACKAGE_ADDED},
+     * {@link Intent#ACTION_PACKAGE_CHANGED}, or {@link Intent#ACTION_PACKAGE_REMOVED}
      * intent.
      *
      * @param intent
@@ -264,6 +267,9 @@ public class ApplicationsProvider extends ContentProvider {
         packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
         packageFilter.addDataScheme("package");
         getContext().registerReceiver(mBroadcastReceiver, packageFilter);
+        IntentFilter localeFilter = new IntentFilter();
+        localeFilter.addAction(Intent.ACTION_LOCALE_CHANGED);
+        getContext().registerReceiver(mBroadcastReceiver, localeFilter);
     }
     
     /**
