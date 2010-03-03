@@ -463,6 +463,7 @@ public class ApplicationsProvider extends ContentProvider {
             mDb.setTransactionSuccessful();
         } finally {
             mDb.endTransaction();
+            inserter.close();
         }
         if (DBG) Log.d(TAG, "Finished updating database.");
     }
