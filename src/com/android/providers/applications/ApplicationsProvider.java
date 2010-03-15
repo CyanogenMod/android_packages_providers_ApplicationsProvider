@@ -26,8 +26,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.UriMatcher;
+import android.content.pm.ActivityInfo;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
@@ -439,19 +442,7 @@ public class ApplicationsProvider extends ContentProvider {
                 if (TextUtils.isEmpty(title)) {
                     title = info.activityInfo.name;
                 }
-                
-                String icon;
-                if (info.activityInfo.getIconResource() != 0) {
-                    // Use a resource Uri for the icon.
-                    icon = new Uri.Builder()
-                            .scheme(ContentResolver.SCHEME_ANDROID_RESOURCE)
-                            .authority(info.activityInfo.applicationInfo.packageName)
-                            .encodedPath(String.valueOf(info.activityInfo.getIconResource()))
-                            .toString();
-                } else {
-                    // No icon for app, use default app icon.
-                    icon = String.valueOf(com.android.internal.R.drawable.sym_def_app_icon);
-                }
+                String icon = getActivityIconUri(info.activityInfo);
                 inserter.prepareForInsert();
                 inserter.bind(nameCol, title);
                 inserter.bind(descriptionCol, description);
@@ -466,6 +457,13 @@ public class ApplicationsProvider extends ContentProvider {
             inserter.close();
         }
         if (DBG) Log.d(TAG, "Finished updating database.");
+    }
+
+    private String getActivityIconUri(ActivityInfo activityInfo) {
+        int icon = activityInfo.getIconResource();
+        if (icon == 0) return null;
+        Uri uri = getResourceUri(getContext(), activityInfo.applicationInfo, icon);
+        return uri == null ? null : uri.toString();
     }
 
     private void removeApplications(String packageName) {
@@ -532,4 +530,38 @@ public class ApplicationsProvider extends ContentProvider {
                 .appendPath(className)
                 .build();
     }
+
+    private static Uri getResourceUri(Context context, ApplicationInfo appInfo, int res) {
+        try {
+            Resources resources = context.getPackageManager().getResourcesForApplication(appInfo);
+            return getResourceUri(resources, appInfo.packageName, res);
+        } catch (PackageManager.NameNotFoundException e) {
+            return null;
+        } catch (Resources.NotFoundException e) {
+            return null;
+        }
+    }
+
+    private static Uri getResourceUri(Resources resources, String appPkg, int res)
+            throws Resources.NotFoundException {
+        String resPkg = resources.getResourcePackageName(res);
+        String type = resources.getResourceTypeName(res);
+        String name = resources.getResourceEntryName(res);
+        return makeResourceUri(appPkg, resPkg, type, name);
+    }
+
+    private static Uri makeResourceUri(String appPkg, String resPkg, String type, String name)
+            throws Resources.NotFoundException {
+        Uri.Builder uriBuilder = new Uri.Builder();
+        uriBuilder.scheme(ContentResolver.SCHEME_ANDROID_RESOURCE);
+        uriBuilder.encodedAuthority(appPkg);
+        uriBuilder.appendEncodedPath(type);
+        if (!appPkg.equals(resPkg)) {
+            uriBuilder.appendEncodedPath(resPkg + ":" + name);
+        } else {
+            uriBuilder.appendEncodedPath(name);
+        }
+        return uriBuilder.build();
+    }
+
 }
