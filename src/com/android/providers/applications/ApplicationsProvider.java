@@ -16,6 +16,8 @@
 
 package com.android.providers.applications;
 
+import com.android.internal.content.PackageMonitor;
+
 import android.app.SearchManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -69,8 +71,7 @@ public class ApplicationsProvider extends ContentProvider {
     private static final int THREAD_PRIORITY = android.os.Process.THREAD_PRIORITY_BACKGROUND;
 
     // Messages for mHandler
-    private static final int MSG_UPDATE = 0;
-    private static final int MSG_REMOVE = 1;
+    private static final int MSG_UPDATE_ALL = 0;
 
     // TODO: Move these to android.provider.Applications?
     public static final String _ID = "_id";
@@ -109,57 +110,44 @@ public class ApplicationsProvider extends ContentProvider {
         return matcher;
     }
 
-    // Broadcast receiver for updating applications list.
-    private BroadcastReceiver mBroadcastReceiver = new BroadcastReceiver() {
+    /**
+     * Updates applications list when packages are added/removed.
+     *
+     * TODO: Maybe this should listen for changes to individual apps instead.
+     */
+    private class MyPackageMonitor extends PackageMonitor {
+        @Override
+        public void onSomePackagesChanged() {
+            postUpdateAll();
+        }
+    }
+
+    // Broadcast receiver for updating applications list when the locale changes.
+    private BroadcastReceiver mLocaleChangeReceiver = new BroadcastReceiver() {
         @Override
         public void onReceive(Context context, Intent intent) {
             String action = intent.getAction();
-            if (Intent.ACTION_PACKAGE_ADDED.equals(action)
-                    || Intent.ACTION_PACKAGE_CHANGED.equals(action)) {
-                if (DBG) Log.d(TAG, "package added/updated: " + intent);
-                String packageName = getPackageName(intent);
-                postAppsUpdate(packageName);
-            } else if (Intent.ACTION_PACKAGE_REMOVED.equals(action)) {
-                if (DBG) Log.d(TAG, "package removed: " + intent);
-                String packageName = getPackageName(intent);
-                postAppsRemove(packageName);
-            } else if (Intent.ACTION_LOCALE_CHANGED.equals(action)) {
+            if (Intent.ACTION_LOCALE_CHANGED.equals(action)) {
                 if (DBG) Log.d(TAG, "locale changed");
-                postAppsUpdate(null);
+                postUpdateAll();
             }
         }
     };
 
-    /**
-     * Gets the package name from an {@link Intent#ACTION_PACKAGE_ADDED},
-     * {@link Intent#ACTION_PACKAGE_CHANGED}, or {@link Intent#ACTION_PACKAGE_REMOVED}
-     * intent.
-     *
-     * @param intent
-     * @return The package name, or {@code null} if none.
-     */
-    private String getPackageName(Intent intent) {
-        Uri data = intent.getData();
-        if (data == null) {
-            Log.e(TAG, "Got intent " + intent + " with no data.");
-            return null;
-        }
-        String packageName = data.getSchemeSpecificPart();
-        if (packageName == null) {
-            Log.e(TAG, "No package name in "  + intent);
-            return null;
-        }
-        return packageName;
-    }
-
     @Override
     public boolean onCreate() {
         createDatabase();
-        registerBroadcastReceiver();
+        // Listen for package changes
+        new MyPackageMonitor().register(getContext(), true);
+        // Listen for locale changes
+        IntentFilter localeFilter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
+        getContext().registerReceiver(mLocaleChangeReceiver, localeFilter);
+        // Start thread that runs app updates
         HandlerThread thread = new HandlerThread("ApplicationsProviderUpdater", THREAD_PRIORITY);
         thread.start();
         mHandler = new UpdateHandler(thread.getLooper());
-        postAppsUpdate(null);
+        // Kick off first apps update
+        postUpdateAll();
         return true;
     }
 
@@ -172,16 +160,9 @@ public class ApplicationsProvider extends ContentProvider {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
-                case MSG_UPDATE: {
-                    String packageName = (String) msg.obj;
-                    updateApplicationsList(packageName);
+                case MSG_UPDATE_ALL:
+                    updateApplicationsList(null);
                     break;
-                }
-                case MSG_REMOVE: {
-                    String packageName = (String) msg.obj;
-                    removeApplications(packageName);
-                    break;
-                }
                 default:
                     Log.e(TAG, "Unknown message: " + msg.what);
                     break;
@@ -191,21 +172,13 @@ public class ApplicationsProvider extends ContentProvider {
 
     /**
      * Posts an update to run on the DB update thread.
-     *
-     * @param packageName Name of package whose activities to update.
-     *        If {@code null}, all packages are updated.
      */
-    private void postAppsUpdate(String packageName) {
+    private void postUpdateAll() {
+        // Clear pending updates
+        mHandler.removeMessages(MSG_UPDATE_ALL);
+        // Post a new update
         Message msg = Message.obtain();
-        msg.what = MSG_UPDATE;
-        msg.obj = packageName;
-        mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
-    }
-
-    private void postAppsRemove(String packageName) {
-        Message msg = Message.obtain();
-        msg.what = MSG_REMOVE;
-        msg.obj = packageName;
+        msg.what = MSG_UPDATE_ALL;
         mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
     }
 
@@ -258,23 +231,7 @@ public class ApplicationsProvider extends ContentProvider {
                 "DELETE FROM applicationsLookup WHERE source = old." + _ID + ";" +
                 "END");
     }
-    
-    /**
-     * Registers a receiver which will be notified when packages are added, removed,
-     * or changed.
-     */
-    private void registerBroadcastReceiver() {
-        IntentFilter packageFilter = new IntentFilter();
-        packageFilter.addAction(Intent.ACTION_PACKAGE_ADDED);
-        packageFilter.addAction(Intent.ACTION_PACKAGE_REMOVED);
-        packageFilter.addAction(Intent.ACTION_PACKAGE_CHANGED);
-        packageFilter.addDataScheme("package");
-        getContext().registerReceiver(mBroadcastReceiver, packageFilter);
-        IntentFilter localeFilter = new IntentFilter();
-        localeFilter.addAction(Intent.ACTION_LOCALE_CHANGED);
-        getContext().registerReceiver(mBroadcastReceiver, localeFilter);
-    }
-    
+
     /**
      * This will always return {@link SearchManager#SUGGEST_MIME_TYPE} as this
      * provider is purely to provide suggestions.
