@@ -48,6 +48,7 @@ import android.util.Log;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Fetches the list of applications installed on the phone to provide search suggestions.
@@ -60,12 +61,14 @@ import java.util.List;
  */
 public class ApplicationsProvider extends ContentProvider {
 
-    private static final boolean DBG = false;
+    private static final boolean DBG = true;
 
     private static final String TAG = "ApplicationsProvider";
 
     private static final int SEARCH_SUGGEST = 0;
     private static final int SHORTCUT_REFRESH = 1;
+    private static final int SEARCH = 2;
+
     private static final UriMatcher sURIMatcher = buildUriMatcher();
 
     private static final int THREAD_PRIORITY = android.os.Process.THREAD_PRIORITY_BACKGROUND;
@@ -73,19 +76,24 @@ public class ApplicationsProvider extends ContentProvider {
     // Messages for mHandler
     private static final int MSG_UPDATE_ALL = 0;
 
-    // TODO: Move these to android.provider.Applications?
     public static final String _ID = "_id";
     public static final String NAME = "name";
     public static final String DESCRIPTION = "description";
     public static final String PACKAGE = "package";
     public static final String CLASS = "class";
     public static final String ICON = "icon";
-    
+
     private static final String APPLICATIONS_TABLE = "applications";
-    
+
+    private static final String APPLICATIONS_LOOKUP_JOIN =
+            "applicationsLookup JOIN " + APPLICATIONS_TABLE + " ON"
+            + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID;
+
     private static final HashMap<String, String> sSearchSuggestionsProjectionMap =
             buildSuggestionsProjectionMap();
-    
+    private static final HashMap<String, String> sSearchProjectionMap =
+            buildSearchProjectionMap();
+
     private SQLiteDatabase mDb;
     // Handler that runs DB updates.
     private Handler mHandler;
@@ -107,6 +115,10 @@ public class ApplicationsProvider extends ContentProvider {
                 SHORTCUT_REFRESH);
         matcher.addURI(Applications.AUTHORITY, SearchManager.SUGGEST_URI_PATH_SHORTCUT + "/*",
                 SHORTCUT_REFRESH);
+        matcher.addURI(Applications.AUTHORITY, Applications.SEARCH_PATH,
+                SEARCH);
+        matcher.addURI(Applications.AUTHORITY, Applications.SEARCH_PATH + "/*",
+                SEARCH);
         return matcher;
     }
 
@@ -243,6 +255,8 @@ public class ApplicationsProvider extends ContentProvider {
                 return SearchManager.SUGGEST_MIME_TYPE;
             case SHORTCUT_REFRESH:
                 return SearchManager.SHORTCUT_MIME_TYPE;
+            case SEARCH:
+                return Applications.APPLICATION_DIR_TYPE;
             default:
                 throw new IllegalArgumentException("Unknown URL " + uri);
         }
@@ -268,18 +282,27 @@ public class ApplicationsProvider extends ContentProvider {
         }
 
         switch (sURIMatcher.match(uri)) {
-            case SEARCH_SUGGEST:
+            case SEARCH_SUGGEST: {
                 String query = null;
                 if (uri.getPathSegments().size() > 1) {
                     query = uri.getLastPathSegment().toLowerCase();
                 }
                 return getSuggestions(query, projectionIn);
-            case SHORTCUT_REFRESH:
+            }
+            case SHORTCUT_REFRESH: {
                 String shortcutId = null;
                 if (uri.getPathSegments().size() > 1) {
                     shortcutId = uri.getLastPathSegment();
                 }
                 return refreshShortcut(shortcutId, projectionIn);
+            }
+            case SEARCH: {
+                String query = null;
+                if (uri.getPathSegments().size() > 1) {
+                    query = uri.getLastPathSegment().toLowerCase();
+                }
+                return getSearchResults(query, projectionIn);
+            }
             default:
                 throw new IllegalArgumentException("Unknown URL " + uri);
         }
@@ -290,23 +313,7 @@ public class ApplicationsProvider extends ContentProvider {
         if (TextUtils.isEmpty(query)) {
             return null;
         }
-
-        // Build SQL query
-        SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
-        qb.setTables("applicationsLookup JOIN " + APPLICATIONS_TABLE + " ON"
-                + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID);
-        qb.setProjectionMap(sSearchSuggestionsProjectionMap);
-        qb.appendWhere(buildTokenFilter(query));
-        // don't return duplicates when there are two matching tokens for an app
-        String groupBy = APPLICATIONS_TABLE + "." + _ID;
-        // order first by whether it a full prefix match, then by name
-        // MIN(token_index) != 0 is true for non-full prefix matches,
-        // and since false (0) < true(1), this expression makes sure
-        // that full prefix matches come first.
-        String order = "MIN(token_index) != 0, " + NAME;
-        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, order);
-        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
-        return cursor;
+        return searchApplications(query, projectionIn, sSearchSuggestionsProjectionMap);
     }
 
     /**
@@ -330,6 +337,30 @@ public class ApplicationsProvider extends ContentProvider {
         return cursor;
     }
 
+    private Cursor getSearchResults(String query, String[] projectionIn) {
+        return searchApplications(query, projectionIn, sSearchProjectionMap);
+    }
+
+    private Cursor searchApplications(String query, String[] projectionIn,
+            Map<String, String> columnMap) {
+        SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
+        qb.setTables(APPLICATIONS_LOOKUP_JOIN);
+        qb.setProjectionMap(columnMap);
+        if (!TextUtils.isEmpty(query)) {
+            qb.appendWhere(buildTokenFilter(query));
+        }
+        // don't return duplicates when there are two matching tokens for an app
+        String groupBy = APPLICATIONS_TABLE + "." + _ID;
+        // order first by whether it a full prefix match, then by name
+        // MIN(token_index) != 0 is true for non-full prefix matches,
+        // and since false (0) < true(1), this expression makes sure
+        // that full prefix matches come first.
+        String order = "MIN(token_index) != 0, " + NAME;
+        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, order);
+        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
+        return cursor;
+    }
+
     @SuppressWarnings("deprecation")
     private String buildTokenFilter(String filterParam) {
         StringBuilder filter = new StringBuilder("token GLOB ");
@@ -340,26 +371,38 @@ public class ApplicationsProvider extends ContentProvider {
                 DatabaseUtils.getHexCollationKey(filterParam) + "*");
         return filter.toString();
     }
-    
+
     private static HashMap<String, String> buildSuggestionsProjectionMap() {
         HashMap<String, String> map = new HashMap<String, String>();
-        map.put(_ID, _ID);
-        map.put(SearchManager.SUGGEST_COLUMN_TEXT_1,
-                NAME + " AS " + SearchManager.SUGGEST_COLUMN_TEXT_1);
-        map.put(SearchManager.SUGGEST_COLUMN_TEXT_2,
-                DESCRIPTION + " AS " + SearchManager.SUGGEST_COLUMN_TEXT_2);
-        map.put(SearchManager.SUGGEST_COLUMN_INTENT_DATA,
+        addProjection(map, Applications.ApplicationColumns._ID, _ID);
+        addProjection(map, SearchManager.SUGGEST_COLUMN_TEXT_1, NAME);
+        addProjection(map, SearchManager.SUGGEST_COLUMN_TEXT_2, DESCRIPTION);
+        addProjection(map, SearchManager.SUGGEST_COLUMN_INTENT_DATA,
                 "'content://" + Applications.AUTHORITY + "/applications/'"
-                + " || " + PACKAGE + " || '/' || " + CLASS
-                + " AS " + SearchManager.SUGGEST_COLUMN_INTENT_DATA);
-        map.put(SearchManager.SUGGEST_COLUMN_ICON_1,
-                ICON + " AS " + SearchManager.SUGGEST_COLUMN_ICON_1);
-        map.put(SearchManager.SUGGEST_COLUMN_ICON_2,
-                "NULL AS " + SearchManager.SUGGEST_COLUMN_ICON_2);
-        map.put(SearchManager.SUGGEST_COLUMN_SHORTCUT_ID,
-                PACKAGE + " || '/' || " + CLASS + " AS "
-                + SearchManager.SUGGEST_COLUMN_SHORTCUT_ID);
+                + " || " + PACKAGE + " || '/' || " + CLASS);
+        addProjection(map, SearchManager.SUGGEST_COLUMN_ICON_1, ICON);
+        addProjection(map, SearchManager.SUGGEST_COLUMN_ICON_2, "NULL");
+        addProjection(map, SearchManager.SUGGEST_COLUMN_SHORTCUT_ID,
+                PACKAGE + " || '/' || " + CLASS);
         return map;
+    }
+
+    private static HashMap<String, String> buildSearchProjectionMap() {
+        HashMap<String, String> map = new HashMap<String, String>();
+        addProjection(map, Applications.ApplicationColumns._ID, _ID);
+        addProjection(map, Applications.ApplicationColumns.NAME, NAME);
+        addProjection(map, Applications.ApplicationColumns.ICON, ICON);
+        addProjection(map, Applications.ApplicationColumns.URI,
+                "'content://" + Applications.AUTHORITY + "/applications/'"
+                + " || " + PACKAGE + " || '/' || " + CLASS);
+        return map;
+    }
+
+    private static void addProjection(HashMap<String, String> map, String name, String value) {
+        if (!value.equals(name)) {
+            value = value + " AS " + name;
+        }
+        map.put(name, value);
     }
 
     /**
@@ -446,46 +489,6 @@ public class ApplicationsProvider extends ContentProvider {
     @Override
     public int delete(Uri uri, String selection, String[] selectionArgs) {
         throw new UnsupportedOperationException();
-    }
-    
-    /**
-     * Gets the application component name from an application URI.
-     * TODO: Move this to android.provider.Applications?
-     * 
-     * @param appUri A URI of the form 
-     * "content://applications/applications/&lt;packageName&gt;/&lt;className&gt;".
-     * @return The component name for the application, or
-     * <code>null</null> if the given URI was <code>null</code>
-     * or malformed.
-     */
-    public static ComponentName getComponentName(Uri appUri) {
-        if (appUri == null) {
-            return null;
-        }
-        List<String> pathSegments = appUri.getPathSegments();
-        if (pathSegments.size() < 3) {
-            return null;
-        }
-        String packageName = pathSegments.get(1);
-        String name = pathSegments.get(2);
-        return new ComponentName(packageName, name);
-    }
-    
-    /**
-     * Gets the URI for an application.
-     * TODO: Move this to android.provider.Applications?
-     * 
-     * @param packageName The name of the application's package.
-     * @param className The class name of the application.
-     * @return A URI of the form 
-     * "content://applications/applications/&lt;packageName&gt;/&lt;className&gt;".
-     */
-    public static Uri getUri(String packageName, String className) {
-        return Applications.CONTENT_URI.buildUpon()
-                .appendEncodedPath("applications")
-                .appendPath(packageName)
-                .appendPath(className)
-                .build();
     }
 
     private static Uri getResourceUri(Context context, ApplicationInfo appInfo, int res) {

@@ -10,7 +10,6 @@
         <activity android:name="ApplicationLauncher"
                 android:label="@string/search_label"
                 android:stateNotNeeded="true"
-                android:theme="@android:style/Theme.NoDisplay"
                 android:excludeFromRecents="true">
 
             <intent-filter>
