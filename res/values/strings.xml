@@ -15,6 +15,9 @@
 -->
 <resources xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
 
+    <!-- Label of this application. -->
+    <string name="app_label">Search Applications Provider</string>
+    
     <!-- Search label for applications. -->
     <string name="search_label">Apps</string>
 

@@ -2,7 +2,7 @@
         package="com.android.providers.applications"
         android:sharedUserId="android.uid.shared">
 
-    <application android:process="android.process.acore">
+    <application android:process="android.process.acore" android:label="@string/app_label">
 
         <provider android:name="ApplicationsProvider" android:authorities="applications"
                 android:syncable="false" android:multiprocess="false" />
