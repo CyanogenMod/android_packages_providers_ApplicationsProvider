@@ -16,8 +16,7 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <!-- no translation found for app_label (8842303127802367578) -->
-    <skip />
+    <string name="app_label" msgid="8842303127802367578">"검색 애플리케이션 공급자"</string>
     <string name="search_label" msgid="6182832093760999173">"애플리케이션"</string>
     <string name="application_desc" msgid="888412554142684749">"애플리케이션"</string>
     <string name="settings_description" msgid="966629744054022387">"설치된 애플리케이션의 이름"</string>
