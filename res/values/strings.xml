@@ -28,4 +28,11 @@
          settings. -->
     <string name="settings_description">Names of installed applications</string>
 
+    <!-- Label for permission to increase an app's launch count. -->
+    <string name="permlab_increase_launch_count">modify application launch counts</string>
+
+    <!-- Description of permission to increase an app's launch count. -->
+    <string name="permdesc_increase_launch_count">Allows a launcher to
+        increase the launch count of applications (used for ranking apps).</string>
+
 </resources>

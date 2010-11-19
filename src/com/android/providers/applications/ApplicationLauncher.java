@@ -23,6 +23,7 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.database.Cursor;
 import android.net.Uri;
+import android.os.AsyncTask;
 import android.os.Bundle;
 import android.provider.Applications;
 import android.util.Log;
@@ -98,7 +99,22 @@ public class ApplicationLauncher extends ListActivity {
             } catch (ActivityNotFoundException ex) {
                 Log.w(TAG, "Activity not found: " + componentName);
             }
+
+            increaseLaunchCount(componentName);
         }
     }
 
+    private void increaseLaunchCount(final ComponentName componentName) {
+        new AsyncTask<Void, Void, Void>() {
+            @Override
+            protected Void doInBackground(Void... args) {
+                try {
+                    Applications.increaseLaunchCount(getContentResolver(), componentName);
+                } catch (RuntimeException e) {
+                    Log.w(TAG, "Could not increase launch count", e);
+                }
+                return null;
+            }
+        }.execute();
+    }
 }

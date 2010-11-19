@@ -36,7 +36,9 @@ import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
+import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteQueryBuilder;
+import android.database.sqlite.SQLiteStatement;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -46,9 +48,13 @@ import android.provider.Applications;
 import android.text.TextUtils;
 import android.util.Log;
 
+import java.lang.Runnable;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import com.google.common.annotations.VisibleForTesting;
 
 /**
  * Fetches the list of applications installed on the phone to provide search suggestions.
@@ -68,6 +74,7 @@ public class ApplicationsProvider extends ContentProvider {
     private static final int SEARCH_SUGGEST = 0;
     private static final int SHORTCUT_REFRESH = 1;
     private static final int SEARCH = 2;
+    private static final int LAUNCH_COUNT_INCREASE = 3;
 
     private static final UriMatcher sURIMatcher = buildUriMatcher();
 
@@ -82,6 +89,7 @@ public class ApplicationsProvider extends ContentProvider {
     public static final String PACKAGE = "package";
     public static final String CLASS = "class";
     public static final String ICON = "icon";
+    public static final String LAUNCH_COUNT = "launch_count";
 
     private static final String APPLICATIONS_TABLE = "applications";
 
@@ -89,15 +97,31 @@ public class ApplicationsProvider extends ContentProvider {
             "applicationsLookup JOIN " + APPLICATIONS_TABLE + " ON"
             + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID;
 
+    private static final String INCREASE_LAUNCH_COUNT_SQL =
+            "UPDATE " + APPLICATIONS_TABLE +
+            " SET " + LAUNCH_COUNT + " = " + LAUNCH_COUNT + " + 1" +
+            " WHERE " + PACKAGE + " = ?" +
+            " AND " + CLASS + " = ?";
+
     private static final HashMap<String, String> sSearchSuggestionsProjectionMap =
             buildSuggestionsProjectionMap();
     private static final HashMap<String, String> sSearchProjectionMap =
             buildSearchProjectionMap();
 
+    /**
+     * An in-memory database storing the details of applications installed on
+     * the device. Populated when the ApplicationsProvider is launched.
+     *
+     * @see PersistentDb
+     */
     private SQLiteDatabase mDb;
+
+    private PersistentDb mPersistentDb;
+
     // Handler that runs DB updates.
     private Handler mHandler;
 
+    private Runnable onApplicationsListUpdated;
 
     /**
      * We delay application updates by this many millis to avoid doing more than one update to the
@@ -119,6 +143,8 @@ public class ApplicationsProvider extends ContentProvider {
                 SEARCH);
         matcher.addURI(Applications.AUTHORITY, Applications.SEARCH_PATH + "/*",
                 SEARCH);
+        matcher.addURI(Applications.AUTHORITY, Applications.INCREASE_LAUNCH_COUNT_PATH,
+                LAUNCH_COUNT_INCREASE);
         return matcher;
     }
 
@@ -149,6 +175,7 @@ public class ApplicationsProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         createDatabase();
+        createPersistentDatabase();
         // Listen for package changes
         new MyPackageMonitor().register(getContext(), true);
         // Listen for locale changes
@@ -210,7 +237,8 @@ public class ApplicationsProvider extends ContentProvider {
                 DESCRIPTION + " description TEXT," +
                 PACKAGE + " TEXT," +
                 CLASS + " TEXT," +
-                ICON + " TEXT" +
+                ICON + " TEXT," +
+                LAUNCH_COUNT + " INTEGER DEFAULT 0" +
                 ");");
         // Needed for efficient update and remove
         mDb.execSQL("CREATE INDEX applicationsComponentIndex ON " + APPLICATIONS_TABLE + " (" 
@@ -245,6 +273,15 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     /**
+     * Creates a persistent database that complements the in-memory one by
+     * storing values that must be kept even if the ApplicationsProvider is
+     * restarted.
+     */
+    private void createPersistentDatabase() {
+        mPersistentDb = new PersistentDb(getContext());
+    }
+
+    /**
      * This will always return {@link SearchManager#SUGGEST_MIME_TYPE} as this
      * provider is purely to provide suggestions.
      */
@@ -258,7 +295,7 @@ public class ApplicationsProvider extends ContentProvider {
             case SEARCH:
                 return Applications.APPLICATION_DIR_TYPE;
             default:
-                throw new IllegalArgumentException("Unknown URL " + uri);
+                throw new IllegalArgumentException("URL " + uri + " doesn't support querying.");
         }
     }
 
@@ -304,7 +341,7 @@ public class ApplicationsProvider extends ContentProvider {
                 return getSearchResults(query, projectionIn);
             }
             default:
-                throw new IllegalArgumentException("Unknown URL " + uri);
+                throw new IllegalArgumentException("URL " + uri + " doesn't support querying.");
         }
     }
 
@@ -351,11 +388,14 @@ public class ApplicationsProvider extends ContentProvider {
         }
         // don't return duplicates when there are two matching tokens for an app
         String groupBy = APPLICATIONS_TABLE + "." + _ID;
-        // order first by whether it a full prefix match, then by name
+        // order first by whether it a full prefix match, then by launch
+        // count (frequently used apps rank higher), then name
         // MIN(token_index) != 0 is true for non-full prefix matches,
         // and since false (0) < true(1), this expression makes sure
         // that full prefix matches come first.
-        String order = "MIN(token_index) != 0, " + NAME;
+        String order = "MIN(token_index) != 0, " +
+                LAUNCH_COUNT + " DESC, " +
+                NAME;
         Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, order);
         if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
         return cursor;
@@ -421,6 +461,12 @@ public class ApplicationsProvider extends ContentProvider {
         int packageCol = inserter.getColumnIndex(PACKAGE);
         int classCol = inserter.getColumnIndex(CLASS);
         int iconCol = inserter.getColumnIndex(ICON);
+        int launchCountCol = inserter.getColumnIndex(LAUNCH_COUNT);
+
+        // We'll copy the values stored in the persistent DB to the in-memory
+        // one to improve querying speed.
+        Map<ComponentName, Long> launchCounts = mPersistentDb.getLaunchCounts();
+        List<ComponentName> newComponents = new ArrayList<ComponentName>();
 
         mDb.beginTransaction();
         try {
@@ -433,22 +479,34 @@ public class ApplicationsProvider extends ContentProvider {
                 // Limit to activities in the package, if given
                 mainIntent.setPackage(packageName);
             }
-            final PackageManager manager = getContext().getPackageManager();
+            final PackageManager manager = getPackageManager();
             List<ResolveInfo> activities = manager.queryIntentActivities(mainIntent, 0);
             int activityCount = activities == null ? 0 : activities.size();
             for (int i = 0; i < activityCount; i++) {
                 ResolveInfo info = activities.get(i);
                 String title = info.loadLabel(manager).toString();
+                String activityClassName = info.activityInfo.name;
                 if (TextUtils.isEmpty(title)) {
-                    title = info.activityInfo.name;
+                    title = activityClassName;
                 }
+
+                String activityPackageName = info.activityInfo.applicationInfo.packageName;
+                ComponentName componentName = new ComponentName(activityPackageName, activityClassName);
+                Long launchCount = launchCounts.get(componentName);
+                if (launchCount == null) {
+                    // Component not in the persisted DB yet.
+                    newComponents.add(componentName);
+                    launchCount = 0L;
+                }
+
                 String icon = getActivityIconUri(info.activityInfo);
                 inserter.prepareForInsert();
                 inserter.bind(nameCol, title);
                 inserter.bind(descriptionCol, description);
-                inserter.bind(packageCol, info.activityInfo.applicationInfo.packageName);
-                inserter.bind(classCol, info.activityInfo.name);
+                inserter.bind(packageCol, activityPackageName);
+                inserter.bind(classCol, activityClassName);
                 inserter.bind(iconCol, icon);
+                inserter.bind(launchCountCol, launchCount);
                 inserter.execute();
             }
             mDb.setTransactionSuccessful();
@@ -456,13 +514,23 @@ public class ApplicationsProvider extends ContentProvider {
             mDb.endTransaction();
             inserter.close();
         }
+
+        // Add new components to persistent DB.
+        for (ComponentName newComponent : newComponents) {
+            mPersistentDb.insertNewComponent(newComponent);
+        }
+
+        if (onApplicationsListUpdated != null) {
+            onApplicationsListUpdated.run();
+        }
+
         if (DBG) Log.d(TAG, "Finished updating database.");
     }
 
     private String getActivityIconUri(ActivityInfo activityInfo) {
         int icon = activityInfo.getIconResource();
         if (icon == 0) return null;
-        Uri uri = getResourceUri(getContext(), activityInfo.applicationInfo, icon);
+        Uri uri = getResourceUri(activityInfo.applicationInfo, icon);
         return uri == null ? null : uri.toString();
     }
 
@@ -477,7 +545,61 @@ public class ApplicationsProvider extends ContentProvider {
 
     @Override
     public Uri insert(Uri uri, ContentValues values) {
-        throw new UnsupportedOperationException();
+        if (DBG) Log.d(TAG, "Data insert request arrived on uri "
+                + uri + " with parameters: " + values);
+
+        switch (sURIMatcher.match(uri)) {
+            case LAUNCH_COUNT_INCREASE:
+                increaseLaunchCount(values);
+                return null;
+
+            default:
+                throw new IllegalArgumentException("URL " + uri + " doesn't support inserts.");
+        }
+    }
+
+    private void increaseLaunchCount(ContentValues requestParameters) {
+        String packageName = requestParameters.getAsString(
+                Applications.INCREASE_LAUNCH_COUNT_PACKAGE);
+        String className = requestParameters.getAsString(
+                Applications.INCREASE_LAUNCH_COUNT_CLASS);
+
+        if (TextUtils.isEmpty(packageName)) {
+            Log.w(TAG, Applications.INCREASE_LAUNCH_COUNT_PACKAGE + " parameter missing");
+            return;
+        }
+
+        if (TextUtils.isEmpty(className)) {
+          Log.w(TAG, Applications.INCREASE_LAUNCH_COUNT_CLASS + " parameter missing");
+          return;
+        }
+
+        ComponentName componentName = new ComponentName(packageName, className);
+        increaseLaunchCount(componentName);
+    }
+
+    private void increaseLaunchCount(ComponentName componentName) {
+        enforcePermissionForLaunchCountIncrease();
+
+        if (DBG) Log.d(TAG, "Increasing launch count of component " + componentName);
+
+        // Increase the launch count in the in-memory database.
+        mDb.beginTransaction();
+        try {
+            mDb.execSQL(INCREASE_LAUNCH_COUNT_SQL, new Object[] {
+                    componentName.getPackageName(),
+                    componentName.getClassName()});
+
+            mDb.setTransactionSuccessful();
+        } finally {
+            mDb.endTransaction();
+        }
+
+        // Also persist the new value since the ApplicationsProvider may be
+        // killed unexpectedly.
+        mPersistentDb.increaseLaunchCount(componentName);
+
+        if (DBG) Log.d(TAG, "Launch count increased for component " + componentName);
     }
 
     @Override
@@ -491,9 +613,9 @@ public class ApplicationsProvider extends ContentProvider {
         throw new UnsupportedOperationException();
     }
 
-    private static Uri getResourceUri(Context context, ApplicationInfo appInfo, int res) {
+    private Uri getResourceUri(ApplicationInfo appInfo, int res) {
         try {
-            Resources resources = context.getPackageManager().getResourcesForApplication(appInfo);
+            Resources resources = getPackageManager().getResourcesForApplication(appInfo);
             return getResourceUri(resources, appInfo.packageName, res);
         } catch (PackageManager.NameNotFoundException e) {
             return null;
@@ -522,6 +644,22 @@ public class ApplicationsProvider extends ContentProvider {
             uriBuilder.appendEncodedPath(name);
         }
         return uriBuilder.build();
+    }
+
+    @VisibleForTesting
+    protected PackageManager getPackageManager() {
+        return getContext().getPackageManager();
+    }
+
+    @VisibleForTesting
+    protected void enforcePermissionForLaunchCountIncrease() {
+        getContext().enforceCallingOrSelfPermission(
+                Manifest.permission.INCREASE_LAUNCH_COUNT, null);
+    }
+
+    @VisibleForTesting
+    protected void setOnApplicationsListUpdated(Runnable onApplicationsListUpdated) {
+        this.onApplicationsListUpdated = onApplicationsListUpdated;
     }
 
 }
