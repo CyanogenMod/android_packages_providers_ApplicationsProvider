@@ -23,10 +23,12 @@ import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Applications;
 import android.test.ProviderTestCase2;
+import android.test.suitebuilder.annotation.LargeTest;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
+
 
 /**
  * Instrumentation test for the ApplicationsProvider.
@@ -36,6 +38,7 @@ import java.util.concurrent.TimeUnit;
  * is also created in an isolated context so it doesn't interfere with the
  * database of the actual ApplicationsProvider installed on the device.
  */
+@LargeTest
 public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProviderForTesting> {
 
     private ApplicationsProviderForTesting mProvider;
