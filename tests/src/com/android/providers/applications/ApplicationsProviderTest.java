@@ -118,7 +118,9 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                 "Ebay", "Email", "Fakeapp");
     }
 
-    public void testSearch_appsAreRankedByLaunchCount() throws Exception {
+    public void testSearch_appsAreRankedByLaunchCount() {
+        mProvider.setCanRankByLaunchCount(true);
+
         // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
         // by default).
         increaseLaunchCount(new ComponentName("b", "b.BView"));
@@ -131,10 +133,32 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
     }
 
     /**
+     * The ApplicationsProvider must only rank by launch count if the caller
+     * is a privileged application - ordering apps by launch count when asked
+     * by a regular application would leak information about user behavior.
+     */
+    public void testSearch_notAllowedToRankByLaunchCount() {
+        // Simulate non-privileged calling application.
+        mProvider.setCanRankByLaunchCount(false);
+
+        // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
+        // by default).
+        increaseLaunchCount(new ComponentName("b", "b.BView"));
+        increaseLaunchCount(new ComponentName("d", "d.DView"));
+        increaseLaunchCount(new ComponentName("d", "d.DView"));
+
+        // Launch count information mustn't be leaked - ranking is still
+        // alphabetic.
+        testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD");
+    }
+
+    /**
      * Tests that the launch count values are persisted even if the
      * ApplicationsProvider is restarted.
      */
     public void testSearch_launchCountInformationIsPersistent() throws Exception {
+        mProvider.setCanRankByLaunchCount(true);
+
         // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
         // by default).
         increaseLaunchCount(new ComponentName("b", "b.BView"));
@@ -150,6 +174,7 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         // to the same launch count information as the original provider instance.
         // The new instance will use the same IsolatedContext as the previous one.
         ApplicationsProviderForTesting newProviderInstance = createNewProvider(mProvider.getContext());
+        newProviderInstance.setCanRankByLaunchCount(true);
         assertNotSame(newProviderInstance, mProvider);
 
         // Override the previous provider with the new instance in the

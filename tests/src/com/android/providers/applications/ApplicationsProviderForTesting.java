@@ -25,17 +25,28 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
 
     private PackageManager mMockPackageManager;
 
+    private boolean mCanRankByLaunchCount;
+
     @Override
     protected PackageManager getPackageManager() {
         return mMockPackageManager;
     }
 
     protected void setMockPackageManager(PackageManager mockPackageManager) {
-        this.mMockPackageManager = mockPackageManager;
+        mMockPackageManager = mockPackageManager;
     }
 
     @Override
     protected void enforcePermissionForLaunchCountIncrease() {
         // Tests are allowed to do this.
+    }
+
+    protected void setCanRankByLaunchCount(boolean canRankByLaunchCount) {
+        mCanRankByLaunchCount = canRankByLaunchCount;
+    }
+
+    @Override
+    protected boolean canRankByLaunchCount() {
+        return mCanRankByLaunchCount;
     }
 }

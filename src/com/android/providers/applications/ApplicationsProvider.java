@@ -388,17 +388,28 @@ public class ApplicationsProvider extends ContentProvider {
         }
         // don't return duplicates when there are two matching tokens for an app
         String groupBy = APPLICATIONS_TABLE + "." + _ID;
+        String orderBy = getOrderBy();
+        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, orderBy);
+        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
+        return cursor;
+    }
+
+    private String getOrderBy() {
         // order first by whether it a full prefix match, then by launch
-        // count (frequently used apps rank higher), then name
+        // count (if allowed, frequently used apps rank higher), then name
         // MIN(token_index) != 0 is true for non-full prefix matches,
         // and since false (0) < true(1), this expression makes sure
         // that full prefix matches come first.
-        String order = "MIN(token_index) != 0, " +
-                LAUNCH_COUNT + " DESC, " +
-                NAME;
-        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, order);
-        if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
-        return cursor;
+        StringBuilder orderBy = new StringBuilder();
+        orderBy.append("MIN(token_index) != 0");
+
+        if (canRankByLaunchCount()) {
+            orderBy.append(", " + LAUNCH_COUNT + " DESC");
+        }
+
+        orderBy.append(", " + NAME);
+
+        return orderBy.toString();
     }
 
     @SuppressWarnings("deprecation")
@@ -655,6 +666,15 @@ public class ApplicationsProvider extends ContentProvider {
     protected void enforcePermissionForLaunchCountIncrease() {
         getContext().enforceCallingOrSelfPermission(
                 Manifest.permission.INCREASE_LAUNCH_COUNT, null);
+    }
+
+    @VisibleForTesting
+    protected boolean canRankByLaunchCount() {
+        // Only the global search system is allowed to rank apps by launch count.
+        // Without this restriction the ApplicationsProvider could leak
+        // information about the user's behavior to applications.
+        return (PackageManager.PERMISSION_GRANTED ==
+                getContext().checkCallingPermission(android.Manifest.permission.GLOBAL_SEARCH));
     }
 
     @VisibleForTesting
