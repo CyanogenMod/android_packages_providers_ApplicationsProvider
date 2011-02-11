@@ -18,6 +18,9 @@ package com.android.providers.applications;
 
 import com.android.internal.content.PackageMonitor;
 
+import android.app.ActivityManager;
+import android.app.AlarmManager;
+import android.app.PendingIntent;
 import android.app.SearchManager;
 import android.content.BroadcastReceiver;
 import android.content.ComponentName;
@@ -74,7 +77,6 @@ public class ApplicationsProvider extends ContentProvider {
     private static final int SEARCH_SUGGEST = 0;
     private static final int SHORTCUT_REFRESH = 1;
     private static final int SEARCH = 2;
-    private static final int LAUNCH_COUNT_INCREASE = 3;
 
     private static final UriMatcher sURIMatcher = buildUriMatcher();
 
@@ -82,6 +84,11 @@ public class ApplicationsProvider extends ContentProvider {
 
     // Messages for mHandler
     private static final int MSG_UPDATE_ALL = 0;
+    private static final int MSG_UPDATE_APP_LAUNCH_COUNTS = 1;
+
+    // A request to update application launch counts.
+    private static final String INTENT_UPDATE_LAUNCH_COUNTS =
+            ApplicationsProvider.class.getName() + ".UPDATE_LAUNCH_COUNTS";
 
     public static final String _ID = "_id";
     public static final String NAME = "name";
@@ -97,12 +104,6 @@ public class ApplicationsProvider extends ContentProvider {
             "applicationsLookup JOIN " + APPLICATIONS_TABLE + " ON"
             + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID;
 
-    private static final String INCREASE_LAUNCH_COUNT_SQL =
-            "UPDATE " + APPLICATIONS_TABLE +
-            " SET " + LAUNCH_COUNT + " = " + LAUNCH_COUNT + " + 1" +
-            " WHERE " + PACKAGE + " = ?" +
-            " AND " + CLASS + " = ?";
-
     private static final HashMap<String, String> sSearchSuggestionsProjectionMap =
             buildSuggestionsProjectionMap();
     private static final HashMap<String, String> sSearchProjectionMap =
@@ -111,12 +112,8 @@ public class ApplicationsProvider extends ContentProvider {
     /**
      * An in-memory database storing the details of applications installed on
      * the device. Populated when the ApplicationsProvider is launched.
-     *
-     * @see PersistentDb
      */
     private SQLiteDatabase mDb;
-
-    private PersistentDb mPersistentDb;
 
     // Handler that runs DB updates.
     private Handler mHandler;
@@ -128,6 +125,11 @@ public class ApplicationsProvider extends ContentProvider {
      * applications list within this window.
      */
     private static final long UPDATE_DELAY_MILLIS = 1000L;
+
+    /**
+     * Application launch counts will be updated every 6 hours.
+     */
+    private static final long LAUNCH_COUNT_UPDATE_INTERVAL = AlarmManager.INTERVAL_HOUR * 6;
 
     private static UriMatcher buildUriMatcher() {
         UriMatcher matcher =  new UriMatcher(UriMatcher.NO_MATCH);
@@ -143,8 +145,6 @@ public class ApplicationsProvider extends ContentProvider {
                 SEARCH);
         matcher.addURI(Applications.AUTHORITY, Applications.SEARCH_PATH + "/*",
                 SEARCH);
-        matcher.addURI(Applications.AUTHORITY, Applications.INCREASE_LAUNCH_COUNT_PATH,
-                LAUNCH_COUNT_INCREASE);
         return matcher;
     }
 
@@ -172,10 +172,23 @@ public class ApplicationsProvider extends ContentProvider {
         }
     };
 
+    // Broadcast receiver receiving "update application launch counts" requests
+    // fired by the AlarmManager at regular intervals.
+    private BroadcastReceiver mLaunchCountUpdateReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if (INTENT_UPDATE_LAUNCH_COUNTS.equals(action)) {
+                if (DBG) Log.d(TAG, "Launch count update requested");
+                mHandler.removeMessages(MSG_UPDATE_APP_LAUNCH_COUNTS);
+                Message.obtain(mHandler, MSG_UPDATE_APP_LAUNCH_COUNTS).sendToTarget();
+            }
+        }
+    };
+
     @Override
     public boolean onCreate() {
         createDatabase();
-        createPersistentDatabase();
         // Listen for package changes
         new MyPackageMonitor().register(getContext(), true);
         // Listen for locale changes
@@ -187,6 +200,7 @@ public class ApplicationsProvider extends ContentProvider {
         mHandler = new UpdateHandler(thread.getLooper());
         // Kick off first apps update
         postUpdateAll();
+        scheduleRegularLaunchCountUpdates();
         return true;
     }
 
@@ -201,6 +215,9 @@ public class ApplicationsProvider extends ContentProvider {
             switch (msg.what) {
                 case MSG_UPDATE_ALL:
                     updateApplicationsList(null);
+                    break;
+                case MSG_UPDATE_APP_LAUNCH_COUNTS:
+                    updateLaunchCounts();
                     break;
                 default:
                     Log.e(TAG, "Unknown message: " + msg.what);
@@ -219,6 +236,27 @@ public class ApplicationsProvider extends ContentProvider {
         Message msg = Message.obtain();
         msg.what = MSG_UPDATE_ALL;
         mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
+    }
+
+    @VisibleForTesting
+    protected void scheduleRegularLaunchCountUpdates() {
+        // Set up a recurring event that sends an intent caught by the
+        // mLaunchCountUpdateReceiver event handler. This event handler
+        // will update application launch counts in the ApplicationsProvider's
+        // database.
+        getContext().registerReceiver(
+                mLaunchCountUpdateReceiver,
+                new IntentFilter(INTENT_UPDATE_LAUNCH_COUNTS));
+
+        PendingIntent updateLaunchCountsIntent = PendingIntent.getBroadcast(
+                getContext(), 0, new Intent(INTENT_UPDATE_LAUNCH_COUNTS),
+                PendingIntent.FLAG_CANCEL_CURRENT);
+
+        // Schedule the recurring event.
+        AlarmManager alarmManager =
+                (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
+        alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME, LAUNCH_COUNT_UPDATE_INTERVAL,
+                LAUNCH_COUNT_UPDATE_INTERVAL, updateLaunchCountsIntent);
     }
 
     // ----------
@@ -270,15 +308,6 @@ public class ApplicationsProvider extends ContentProvider {
                 "BEGIN " +
                 "DELETE FROM applicationsLookup WHERE source = old." + _ID + ";" +
                 "END");
-    }
-
-    /**
-     * Creates a persistent database that complements the in-memory one by
-     * storing values that must be kept even if the ApplicationsProvider is
-     * restarted.
-     */
-    private void createPersistentDatabase() {
-        mPersistentDb = new PersistentDb(getContext());
     }
 
     /**
@@ -474,10 +503,7 @@ public class ApplicationsProvider extends ContentProvider {
         int iconCol = inserter.getColumnIndex(ICON);
         int launchCountCol = inserter.getColumnIndex(LAUNCH_COUNT);
 
-        // We'll copy the values stored in the persistent DB to the in-memory
-        // one to improve querying speed.
-        Map<ComponentName, Long> launchCounts = mPersistentDb.getLaunchCounts();
-        List<ComponentName> newComponents = new ArrayList<ComponentName>();
+        Map<String, Integer> launchCounts = fetchLaunchCounts();
 
         mDb.beginTransaction();
         try {
@@ -502,12 +528,9 @@ public class ApplicationsProvider extends ContentProvider {
                 }
 
                 String activityPackageName = info.activityInfo.applicationInfo.packageName;
-                ComponentName componentName = new ComponentName(activityPackageName, activityClassName);
-                Long launchCount = launchCounts.get(componentName);
+                Integer launchCount = launchCounts.get(activityPackageName);
                 if (launchCount == null) {
-                    // Component not in the persisted DB yet.
-                    newComponents.add(componentName);
-                    launchCount = 0L;
+                    launchCount = 0;
                 }
 
                 String icon = getActivityIconUri(info.activityInfo);
@@ -526,16 +549,32 @@ public class ApplicationsProvider extends ContentProvider {
             inserter.close();
         }
 
-        // Add new components to persistent DB.
-        for (ComponentName newComponent : newComponents) {
-            mPersistentDb.insertNewComponent(newComponent);
-        }
-
         if (onApplicationsListUpdated != null) {
             onApplicationsListUpdated.run();
         }
 
         if (DBG) Log.d(TAG, "Finished updating database.");
+    }
+
+    @VisibleForTesting
+    protected void updateLaunchCounts() {
+        Map<String, Integer> launchCounts = fetchLaunchCounts();
+
+        mDb.beginTransaction();
+        try {
+            for (String packageName : launchCounts.keySet()) {
+                ContentValues updatedValues = new ContentValues();
+                updatedValues.put(LAUNCH_COUNT, launchCounts.get(packageName));
+
+                mDb.update(APPLICATIONS_TABLE, updatedValues,
+                        PACKAGE + " = ?", new String[] { packageName });
+            }
+            mDb.setTransactionSuccessful();
+        } finally {
+            mDb.endTransaction();
+        }
+
+        if (DBG) Log.d(TAG, "Finished updating application launch counts in database.");
     }
 
     private String getActivityIconUri(ActivityInfo activityInfo) {
@@ -556,61 +595,7 @@ public class ApplicationsProvider extends ContentProvider {
 
     @Override
     public Uri insert(Uri uri, ContentValues values) {
-        if (DBG) Log.d(TAG, "Data insert request arrived on uri "
-                + uri + " with parameters: " + values);
-
-        switch (sURIMatcher.match(uri)) {
-            case LAUNCH_COUNT_INCREASE:
-                increaseLaunchCount(values);
-                return null;
-
-            default:
-                throw new IllegalArgumentException("URL " + uri + " doesn't support inserts.");
-        }
-    }
-
-    private void increaseLaunchCount(ContentValues requestParameters) {
-        String packageName = requestParameters.getAsString(
-                Applications.INCREASE_LAUNCH_COUNT_PACKAGE);
-        String className = requestParameters.getAsString(
-                Applications.INCREASE_LAUNCH_COUNT_CLASS);
-
-        if (TextUtils.isEmpty(packageName)) {
-            Log.w(TAG, Applications.INCREASE_LAUNCH_COUNT_PACKAGE + " parameter missing");
-            return;
-        }
-
-        if (TextUtils.isEmpty(className)) {
-          Log.w(TAG, Applications.INCREASE_LAUNCH_COUNT_CLASS + " parameter missing");
-          return;
-        }
-
-        ComponentName componentName = new ComponentName(packageName, className);
-        increaseLaunchCount(componentName);
-    }
-
-    private void increaseLaunchCount(ComponentName componentName) {
-        enforcePermissionForLaunchCountIncrease();
-
-        if (DBG) Log.d(TAG, "Increasing launch count of component " + componentName);
-
-        // Increase the launch count in the in-memory database.
-        mDb.beginTransaction();
-        try {
-            mDb.execSQL(INCREASE_LAUNCH_COUNT_SQL, new Object[] {
-                    componentName.getPackageName(),
-                    componentName.getClassName()});
-
-            mDb.setTransactionSuccessful();
-        } finally {
-            mDb.endTransaction();
-        }
-
-        // Also persist the new value since the ApplicationsProvider may be
-        // killed unexpectedly.
-        mPersistentDb.increaseLaunchCount(componentName);
-
-        if (DBG) Log.d(TAG, "Launch count increased for component " + componentName);
+        throw new UnsupportedOperationException();
     }
 
     @Override
@@ -658,14 +643,22 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     @VisibleForTesting
-    protected PackageManager getPackageManager() {
-        return getContext().getPackageManager();
+    protected Map<String, Integer> fetchLaunchCounts() {
+        try {
+            ActivityManager activityManager = (ActivityManager)
+                    getContext().getSystemService(Context.ACTIVITY_SERVICE);
+
+            Map<String, Integer> allPackageLaunchCounts = activityManager.getAllPackageLaunchCounts();
+            return allPackageLaunchCounts;
+        } catch (Exception e) {
+            Log.w(TAG, "Could not fetch launch counts", e);
+            return new HashMap<String, Integer>();
+        }
     }
 
     @VisibleForTesting
-    protected void enforcePermissionForLaunchCountIncrease() {
-        getContext().enforceCallingOrSelfPermission(
-                Manifest.permission.INCREASE_LAUNCH_COUNT, null);
+    protected PackageManager getPackageManager() {
+        return getContext().getPackageManager();
     }
 
     @VisibleForTesting

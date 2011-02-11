@@ -17,17 +17,13 @@
 package com.android.providers.applications;
 
 import android.content.ComponentName;
-import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
-import android.net.Uri;
 import android.provider.Applications;
 import android.test.ProviderTestCase2;
 import android.test.suitebuilder.annotation.LargeTest;
 
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
-import java.util.concurrent.TimeUnit;
 
 
 /**
@@ -43,6 +39,8 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
 
     private ApplicationsProviderForTesting mProvider;
 
+    private MockActivityManager mMockActivityManager;
+
     public ApplicationsProviderTest() {
         super(ApplicationsProviderForTesting.class, Applications.AUTHORITY);
     }
@@ -51,6 +49,7 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
     protected void setUp() throws Exception {
         super.setUp();
         mProvider = getProvider();
+        mMockActivityManager = new MockActivityManager();
         initProvider(mProvider);
     }
 
@@ -62,6 +61,7 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         MockPackageManager mockPackageManager = new MockPackageManager();
         addDefaultTestPackages(mockPackageManager);
         provider.setMockPackageManager(mockPackageManager);
+        provider.setMockActivityManager(mMockActivityManager);
 
         // We need to wait for the applications database to be updated (it's
         // updated with a slight delay by a separate thread) before we can use
@@ -118,14 +118,37 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                 "Ebay", "Email", "Fakeapp");
     }
 
-    public void testSearch_appsAreRankedByLaunchCount() {
+    public void testSearch_appsAreRankedByLaunchCountOnStartup() throws Exception {
+        mMockActivityManager.addLaunchCount("d", 3);
+        mMockActivityManager.addLaunchCount("b", 1);
+        // Missing launch count for "a".
+        mMockActivityManager.addLaunchCount("c", 0);
+
+        // Launch count database is populated on startup.
+        mProvider = createNewProvider(getMockContext());
+        mProvider.setCanRankByLaunchCount(true);
+        initProvider(mProvider);
+
+        // Override the previous provider with the new instance in the
+        // ContentResolver.
+        getMockContentResolver().addProvider(Applications.AUTHORITY, mProvider);
+
+        // New ranking: D, B, A, C (first by launch count, then
+        // - if the launch counts of two apps are equal - alphabetically)
+        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC");
+    }
+
+    public void testSearch_appsAreRankedByLaunchCountAfterScheduledUpdate() {
         mProvider.setCanRankByLaunchCount(true);
 
-        // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
-        // by default).
-        increaseLaunchCount(new ComponentName("b", "b.BView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
+        mMockActivityManager.addLaunchCount("d", 3);
+        mMockActivityManager.addLaunchCount("b", 1);
+        // Missing launch count for "a".
+        mMockActivityManager.addLaunchCount("c", 0);
+
+        // Fetch new data from launch count provider (in the real instance this
+        // is scheduled).
+        mProvider.updateLaunchCounts();
 
         // New ranking: D, B, A, C (first by launch count, then
         // - if the launch counts of two apps are equal - alphabetically)
@@ -141,50 +164,17 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         // Simulate non-privileged calling application.
         mProvider.setCanRankByLaunchCount(false);
 
-        // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
-        // by default).
-        increaseLaunchCount(new ComponentName("b", "b.BView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
+        mMockActivityManager.addLaunchCount("d", 3);
+        mMockActivityManager.addLaunchCount("b", 1);
+        mMockActivityManager.addLaunchCount("a", 0);
+        mMockActivityManager.addLaunchCount("c", 0);
+
+        // Fetch new data from launch count provider.
+        mProvider.updateLaunchCounts();
 
         // Launch count information mustn't be leaked - ranking is still
         // alphabetic.
         testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD");
-    }
-
-    /**
-     * Tests that the launch count values are persisted even if the
-     * ApplicationsProvider is restarted.
-     */
-    public void testSearch_launchCountInformationIsPersistent() throws Exception {
-        mProvider.setCanRankByLaunchCount(true);
-
-        // Original ranking: A, B, C, D (alphabetic; all launch counts are 0
-        // by default).
-        increaseLaunchCount(new ComponentName("b", "b.BView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
-        increaseLaunchCount(new ComponentName("d", "d.DView"));
-
-        // New ranking: D, B, A, C (first by launch count, then
-        // - if the launch counts of two apps are equal - alphabetically)
-        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC");
-
-        // Now we'll create a new ApplicationsProvider instance (the provider
-        // may be killed by Android at any time) and verify that it has access
-        // to the same launch count information as the original provider instance.
-        // The new instance will use the same IsolatedContext as the previous one.
-        ApplicationsProviderForTesting newProviderInstance = createNewProvider(mProvider.getContext());
-        newProviderInstance.setCanRankByLaunchCount(true);
-        assertNotSame(newProviderInstance, mProvider);
-
-        // Override the previous provider with the new instance in the
-        // ContentResolver.
-        getMockContentResolver().addProvider(Applications.AUTHORITY, newProviderInstance);
-
-        initProvider(newProviderInstance);
-
-        // Verify that the launch-count-dependent ordering is still correct.
-        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC");
     }
 
     private void testSearch(String searchQuery, String... expectedResultsInOrder) {
@@ -213,14 +203,6 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                 cursor.moveToNext();
             }
         }
-    }
-
-    /**
-     * Makes the ApplicationsProvider increase the launch count of this
-     * application stored in its database.
-     */
-    private void increaseLaunchCount(ComponentName componentName) {
-        Applications.increaseLaunchCount(getMockContentResolver(), componentName);
     }
 
     private ApplicationsProviderForTesting createNewProvider(Context context) throws Exception {

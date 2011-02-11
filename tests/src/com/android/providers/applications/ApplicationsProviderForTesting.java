@@ -18,12 +18,16 @@ package com.android.providers.applications;
 
 import android.content.pm.PackageManager;
 
+import java.util.Map;
+
 /**
  * An extension of {@link ApplicationsProvider} that makes its testing easier.
  */
 public class ApplicationsProviderForTesting extends ApplicationsProvider {
 
     private PackageManager mMockPackageManager;
+
+    private MockActivityManager mMockActivityManager;
 
     private boolean mCanRankByLaunchCount;
 
@@ -37,8 +41,12 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
     }
 
     @Override
-    protected void enforcePermissionForLaunchCountIncrease() {
-        // Tests are allowed to do this.
+    protected Map<String, Integer> fetchLaunchCounts() {
+        return mMockActivityManager.getAllPackageLaunchCounts();
+    }
+
+    protected void setMockActivityManager(MockActivityManager mockActivityManager) {
+        mMockActivityManager = mockActivityManager;
     }
 
     protected void setCanRankByLaunchCount(boolean canRankByLaunchCount) {
@@ -48,5 +56,9 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
     @Override
     protected boolean canRankByLaunchCount() {
         return mCanRankByLaunchCount;
+    }
+
+    @Override
+    protected void scheduleRegularLaunchCountUpdates() {
     }
 }
