@@ -20,4 +20,6 @@
     <string name="search_label" msgid="6182832093760999173">"Приложения"</string>
     <string name="application_desc" msgid="888412554142684749">"Приложение"</string>
     <string name="settings_description" msgid="966629744054022387">"Имена на инсталирани приложения"</string>
+    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"промяна на броя стартирания на приложенията"</string>
+    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Разрешава на стартовия панел да увеличи броя стартирания на приложенията (използва се при класирането им)."</string>
 </resources>

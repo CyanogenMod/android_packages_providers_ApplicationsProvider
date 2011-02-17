@@ -20,4 +20,6 @@
     <string name="search_label" msgid="6182832093760999173">"Aplicacions"</string>
     <string name="application_desc" msgid="888412554142684749">"Aplicació"</string>
     <string name="settings_description" msgid="966629744054022387">"Noms de les aplicacions instal·lades"</string>
+    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"modifica els recomptes d\'inici d\'aplicacions"</string>
+    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Permet que el servei d\'inici augmenti el recompte d\'inici d\'aplicacions (s\'utilitza per classificar aplicacions)."</string>
 </resources>
