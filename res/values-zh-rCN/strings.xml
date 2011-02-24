@@ -20,8 +20,6 @@
     <string name="search_label" msgid="6182832093760999173">"应用程序"</string>
     <string name="application_desc" msgid="888412554142684749">"应用程序"</string>
     <string name="settings_description" msgid="966629744054022387">"已安装的应用程序的名称"</string>
-    <!-- no translation found for permlab_increase_launch_count (8121517078661438072) -->
-    <skip />
-    <!-- no translation found for permdesc_increase_launch_count (5679706552441253593) -->
-    <skip />
+    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"修改应用程序启动次数"</string>
+    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"允许启动器增加应用程序的启动次数（用于为应用程序排名）"</string>
 </resources>

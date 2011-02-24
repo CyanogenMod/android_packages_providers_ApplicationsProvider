@@ -20,8 +20,6 @@
     <string name="search_label" msgid="6182832093760999173">"Sovellukset"</string>
     <string name="application_desc" msgid="888412554142684749">"Sovellus"</string>
     <string name="settings_description" msgid="966629744054022387">"Asennettujen sovelluksien nimet"</string>
-    <!-- no translation found for permlab_increase_launch_count (8121517078661438072) -->
-    <skip />
-    <!-- no translation found for permdesc_increase_launch_count (5679706552441253593) -->
-    <skip />
+    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"muokkaa sovellusten käynnistyskertojen lukumäärää"</string>
+    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Anna käynnistysohjelman kasvattaa sovellusten käynnistyskertojen lukumäärää (käytetään sovelluksien sijoituksien määrittämiseen)."</string>
 </resources>
