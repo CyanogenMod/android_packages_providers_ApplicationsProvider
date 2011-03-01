@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"برنامه های کاربردی"</string>
     <string name="application_desc" msgid="888412554142684749">"برنامه کاربردی"</string>
     <string name="settings_description" msgid="966629744054022387">"نام های برنامه های نصب شده"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"تعداد دفعات راه اندازی برنامه را تغییر می دهد"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"به راه انداز اجازه می دهد تعداد دفعات راه اندازی برنامه ها را افزایش دهد (برای رتبه بندی برنامه ها استفاده می شود)."</string>
 </resources>

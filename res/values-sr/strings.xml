@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Апликације"</string>
     <string name="application_desc" msgid="888412554142684749">"Апликација"</string>
     <string name="settings_description" msgid="966629744054022387">"Називи инсталираних апликација"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"измени бројеве покретања апликација"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Дозвољава покретачу да повећа број покретања апликација (користи се за рангирање апликација)."</string>
 </resources>

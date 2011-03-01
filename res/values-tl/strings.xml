@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Apps"</string>
     <string name="application_desc" msgid="888412554142684749">"Application"</string>
     <string name="settings_description" msgid="966629744054022387">"Mga pangalan ng mga naka-install na application"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"baguhin ang mga bilang ng paglunsad ng application"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Pinapayagan ang isang launcher na taasan ang bilang ng paglunsad ng mga application (ginagamit para sa pagraranggo ng apps)."</string>
 </resources>

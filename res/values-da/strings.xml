@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Programmer"</string>
     <string name="application_desc" msgid="888412554142684749">"Program"</string>
     <string name="settings_description" msgid="966629744054022387">"Navne på installerede programmer"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"ændr antallet af applikationslister"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Gør det muligt for en programliste at forøge antallet af programlister for applikationer (bruges til rangering af apps)."</string>
 </resources>

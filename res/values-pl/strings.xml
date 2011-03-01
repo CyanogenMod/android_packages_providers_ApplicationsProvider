@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Aplikacje"</string>
     <string name="application_desc" msgid="888412554142684749">"Aplikacja"</string>
     <string name="settings_description" msgid="966629744054022387">"Nazwy zainstalowanych aplikacji"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"zmienianie licznika uruchomień aplikacji"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Zezwala programowi uruchamiającemu na zwiększanie licznika uruchomień aplikacji (używane do tworzenia rankingów aplikacji)."</string>
 </resources>

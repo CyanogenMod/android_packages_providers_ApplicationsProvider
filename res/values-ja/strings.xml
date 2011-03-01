@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"アプリケーション"</string>
     <string name="application_desc" msgid="888412554142684749">"アプリケーション"</string>
     <string name="settings_description" msgid="966629744054022387">"インストールされているアプリケーション名"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"アプリケーションの起動数を変更する"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"ランチャーがアプリケーションの起動数（アプリのランク付けに使用）を増やすのを許可する"</string>
 </resources>

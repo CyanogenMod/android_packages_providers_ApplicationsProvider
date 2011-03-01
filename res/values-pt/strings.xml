@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Aplicativos"</string>
     <string name="application_desc" msgid="888412554142684749">"Aplicativo"</string>
     <string name="settings_description" msgid="966629744054022387">"Nomes dos aplicativos instalados"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"modificar contagens de lançamento de aplicativos"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Permite que um iniciador aumente a contagem de lançamento de aplicativos (usado para classificar aplicativos)."</string>
 </resources>

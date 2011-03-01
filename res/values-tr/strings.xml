@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Uygulamalar"</string>
     <string name="application_desc" msgid="888412554142684749">"Uygulama"</string>
     <string name="settings_description" msgid="966629744054022387">"Yüklenen uygulamaların adları"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"uygulama çalıştırılma sayılarını değiştir"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Başlatıcının uygulamaların çalıştırılma sayısını artırmasına izin verir (uygulamaları sıralamada kullanılır)."</string>
 </resources>

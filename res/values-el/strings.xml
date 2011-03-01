@@ -20,6 +20,4 @@
     <string name="search_label" msgid="6182832093760999173">"Εφαρμογές"</string>
     <string name="application_desc" msgid="888412554142684749">"Εφαρμογή"</string>
     <string name="settings_description" msgid="966629744054022387">"Ονόματα εγκατεστημένων εφαρμογών"</string>
-    <string name="permlab_increase_launch_count" msgid="8121517078661438072">"τροποποίηση του αριθμού εκκινήσεων εφαρμογών"</string>
-    <string name="permdesc_increase_launch_count" msgid="5679706552441253593">"Επιτρέπει σε κάποια λειτουργία εκκίνησης να αυξήσει τον αριθμό εκκινήσεων εφαρμογών (χρησιμοποιείται για την κατάταξη των εφαρμογών)."</string>
 </resources>
