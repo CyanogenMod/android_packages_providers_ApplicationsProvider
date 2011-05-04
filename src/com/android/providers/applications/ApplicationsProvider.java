@@ -39,9 +39,7 @@ import android.content.res.Resources;
 import android.database.Cursor;
 import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
-import android.database.sqlite.SQLiteException;
 import android.database.sqlite.SQLiteQueryBuilder;
-import android.database.sqlite.SQLiteStatement;
 import android.net.Uri;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -52,7 +50,6 @@ import android.text.TextUtils;
 import android.util.Log;
 
 import java.lang.Runnable;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -375,8 +372,9 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     private Cursor getSuggestions(String query, String[] projectionIn) {
-        // No zero-query suggestions
-        if (TextUtils.isEmpty(query)) {
+        // No zero-query suggestions except for global search, to avoid leaking info about apps
+        // that have been used.
+        if (TextUtils.isEmpty(query) && !canRankByLaunchCount()) {
             return null;
         }
         return searchApplications(query, projectionIn, sSearchSuggestionsProjectionMap);
@@ -409,34 +407,41 @@ public class ApplicationsProvider extends ContentProvider {
 
     private Cursor searchApplications(String query, String[] projectionIn,
             Map<String, String> columnMap) {
+        final boolean zeroQuery = TextUtils.isEmpty(query);
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         qb.setTables(APPLICATIONS_LOOKUP_JOIN);
         qb.setProjectionMap(columnMap);
-        if (!TextUtils.isEmpty(query)) {
+        if (!zeroQuery) {
             qb.appendWhere(buildTokenFilter(query));
+        } else {
+            if (canRankByLaunchCount()) {
+                qb.appendWhere(LAUNCH_COUNT + " > 0");
+            }
         }
         // don't return duplicates when there are two matching tokens for an app
         String groupBy = APPLICATIONS_TABLE + "." + _ID;
-        String orderBy = getOrderBy();
+        String orderBy = getOrderBy(zeroQuery);
         Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, orderBy);
         if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
         return cursor;
     }
 
-    private String getOrderBy() {
+    private String getOrderBy(boolean zeroQuery) {
         // order first by whether it a full prefix match, then by launch
         // count (if allowed, frequently used apps rank higher), then name
         // MIN(token_index) != 0 is true for non-full prefix matches,
         // and since false (0) < true(1), this expression makes sure
         // that full prefix matches come first.
         StringBuilder orderBy = new StringBuilder();
-        orderBy.append("MIN(token_index) != 0");
-
-        if (canRankByLaunchCount()) {
-            orderBy.append(", " + LAUNCH_COUNT + " DESC");
+        if (!zeroQuery) {
+            orderBy.append("MIN(token_index) != 0, ");
         }
 
-        orderBy.append(", " + NAME);
+        if (canRankByLaunchCount()) {
+            orderBy.append(LAUNCH_COUNT + " DESC, ");
+        }
+
+        orderBy.append(NAME);
 
         return orderBy.toString();
     }
