@@ -18,6 +18,6 @@
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_label" msgid="8842303127802367578">"Suchanwendungsanbieter"</string>
     <string name="search_label" msgid="6182832093760999173">"Apps"</string>
-    <string name="application_desc" msgid="888412554142684749">"Anwendung"</string>
+    <string name="application_desc" msgid="888412554142684749">"App"</string>
     <string name="settings_description" msgid="966629744054022387">"Namen der installierten Anwendungen"</string>
 </resources>
