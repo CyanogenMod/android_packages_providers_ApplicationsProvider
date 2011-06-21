@@ -17,6 +17,7 @@
 package com.android.providers.applications;
 
 import com.android.internal.content.PackageMonitor;
+import com.android.internal.os.PkgUsageStats;
 
 import android.app.ActivityManager;
 import android.app.AlarmManager;
@@ -62,7 +63,7 @@ import com.google.common.annotations.VisibleForTesting;
  * {@link android.provider.Applications} should be updated.
  *
  * TODO: this provider should be moved to the Launcher, which contains similar logic to keep an up
- * to date list of installed applications.  Alternatively, Launcher could be updated to use this 
+ * to date list of installed applications.  Alternatively, Launcher could be updated to use this
  * provider.
  */
 public class ApplicationsProvider extends ContentProvider {
@@ -81,11 +82,6 @@ public class ApplicationsProvider extends ContentProvider {
 
     // Messages for mHandler
     private static final int MSG_UPDATE_ALL = 0;
-    private static final int MSG_UPDATE_APP_LAUNCH_COUNTS = 1;
-
-    // A request to update application launch counts.
-    private static final String INTENT_UPDATE_LAUNCH_COUNTS =
-            ApplicationsProvider.class.getName() + ".UPDATE_LAUNCH_COUNTS";
 
     public static final String _ID = "_id";
     public static final String NAME = "name";
@@ -94,6 +90,10 @@ public class ApplicationsProvider extends ContentProvider {
     public static final String CLASS = "class";
     public static final String ICON = "icon";
     public static final String LAUNCH_COUNT = "launch_count";
+    public static final String LAST_RESUME_TIME = "last_resume_time";
+
+    // A query parameter to refresh application statistics. Used by QSB.
+    public static final String REFRESH_STATS = "refresh";
 
     private static final String APPLICATIONS_TABLE = "applications";
 
@@ -102,7 +102,9 @@ public class ApplicationsProvider extends ContentProvider {
             + " applicationsLookup.source = " + APPLICATIONS_TABLE + "." + _ID;
 
     private static final HashMap<String, String> sSearchSuggestionsProjectionMap =
-            buildSuggestionsProjectionMap();
+            buildSuggestionsProjectionMap(false);
+    private static final HashMap<String, String> sGlobalSearchSuggestionsProjectionMap =
+            buildSuggestionsProjectionMap(true);
     private static final HashMap<String, String> sSearchProjectionMap =
             buildSearchProjectionMap();
 
@@ -122,11 +124,6 @@ public class ApplicationsProvider extends ContentProvider {
      * applications list within this window.
      */
     private static final long UPDATE_DELAY_MILLIS = 1000L;
-
-    /**
-     * Application launch counts will be updated every 6 hours.
-     */
-    private static final long LAUNCH_COUNT_UPDATE_INTERVAL = AlarmManager.INTERVAL_HOUR * 6;
 
     private static UriMatcher buildUriMatcher() {
         UriMatcher matcher =  new UriMatcher(UriMatcher.NO_MATCH);
@@ -169,20 +166,6 @@ public class ApplicationsProvider extends ContentProvider {
         }
     };
 
-    // Broadcast receiver receiving "update application launch counts" requests
-    // fired by the AlarmManager at regular intervals.
-    private BroadcastReceiver mLaunchCountUpdateReceiver = new BroadcastReceiver() {
-        @Override
-        public void onReceive(Context context, Intent intent) {
-            String action = intent.getAction();
-            if (INTENT_UPDATE_LAUNCH_COUNTS.equals(action)) {
-                if (DBG) Log.d(TAG, "Launch count update requested");
-                mHandler.removeMessages(MSG_UPDATE_APP_LAUNCH_COUNTS);
-                Message.obtain(mHandler, MSG_UPDATE_APP_LAUNCH_COUNTS).sendToTarget();
-            }
-        }
-    };
-
     @Override
     public boolean onCreate() {
         createDatabase();
@@ -197,7 +180,6 @@ public class ApplicationsProvider extends ContentProvider {
         mHandler = new UpdateHandler(thread.getLooper());
         // Kick off first apps update
         postUpdateAll();
-        scheduleRegularLaunchCountUpdates();
         return true;
     }
 
@@ -212,9 +194,6 @@ public class ApplicationsProvider extends ContentProvider {
             switch (msg.what) {
                 case MSG_UPDATE_ALL:
                     updateApplicationsList(null);
-                    break;
-                case MSG_UPDATE_APP_LAUNCH_COUNTS:
-                    updateLaunchCounts();
                     break;
                 default:
                     Log.e(TAG, "Unknown message: " + msg.what);
@@ -235,27 +214,6 @@ public class ApplicationsProvider extends ContentProvider {
         mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
     }
 
-    @VisibleForTesting
-    protected void scheduleRegularLaunchCountUpdates() {
-        // Set up a recurring event that sends an intent caught by the
-        // mLaunchCountUpdateReceiver event handler. This event handler
-        // will update application launch counts in the ApplicationsProvider's
-        // database.
-        getContext().registerReceiver(
-                mLaunchCountUpdateReceiver,
-                new IntentFilter(INTENT_UPDATE_LAUNCH_COUNTS));
-
-        PendingIntent updateLaunchCountsIntent = PendingIntent.getBroadcast(
-                getContext(), 0, new Intent(INTENT_UPDATE_LAUNCH_COUNTS),
-                PendingIntent.FLAG_CANCEL_CURRENT);
-
-        // Schedule the recurring event.
-        AlarmManager alarmManager =
-                (AlarmManager) getContext().getSystemService(Context.ALARM_SERVICE);
-        alarmManager.setRepeating(AlarmManager.ELAPSED_REALTIME, LAUNCH_COUNT_UPDATE_INTERVAL,
-                LAUNCH_COUNT_UPDATE_INTERVAL, updateLaunchCountsIntent);
-    }
-
     // ----------
     // END ASYC UPDATE CODE
     // ----------
@@ -273,10 +231,11 @@ public class ApplicationsProvider extends ContentProvider {
                 PACKAGE + " TEXT," +
                 CLASS + " TEXT," +
                 ICON + " TEXT," +
-                LAUNCH_COUNT + " INTEGER DEFAULT 0" +
+                LAUNCH_COUNT + " INTEGER DEFAULT 0," +
+                LAST_RESUME_TIME + " INTEGER DEFAULT 0" +
                 ");");
         // Needed for efficient update and remove
-        mDb.execSQL("CREATE INDEX applicationsComponentIndex ON " + APPLICATIONS_TABLE + " (" 
+        mDb.execSQL("CREATE INDEX applicationsComponentIndex ON " + APPLICATIONS_TABLE + " ("
                 + PACKAGE + "," + CLASS + ");");
         // Maps token from the app name to records in the applications table
         mDb.execSQL("CREATE TABLE applicationsLookup (" +
@@ -289,18 +248,18 @@ public class ApplicationsProvider extends ContentProvider {
                 "source" +
                 ");");
         // Triggers to keep the applicationsLookup table up to date
-        mDb.execSQL("CREATE TRIGGER applicationsLookup_update UPDATE OF " + NAME + " ON " + 
+        mDb.execSQL("CREATE TRIGGER applicationsLookup_update UPDATE OF " + NAME + " ON " +
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
                 "DELETE FROM applicationsLookup WHERE source = new." + _ID + ";" +
                 "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
                 "END");
-        mDb.execSQL("CREATE TRIGGER applicationsLookup_insert AFTER INSERT ON " + 
+        mDb.execSQL("CREATE TRIGGER applicationsLookup_insert AFTER INSERT ON " +
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
                 "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
                 "END");
-        mDb.execSQL("CREATE TRIGGER applicationsLookup_delete DELETE ON " + 
+        mDb.execSQL("CREATE TRIGGER applicationsLookup_delete DELETE ON " +
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
                 "DELETE FROM applicationsLookup WHERE source = old." + _ID + ";" +
@@ -350,6 +309,9 @@ public class ApplicationsProvider extends ContentProvider {
                 if (uri.getPathSegments().size() > 1) {
                     query = uri.getLastPathSegment().toLowerCase();
                 }
+                if (uri.getQueryParameter(REFRESH_STATS) != null) {
+                    updateUsageStats();
+                }
                 return getSuggestions(query, projectionIn);
             }
             case SHORTCUT_REFRESH: {
@@ -372,12 +334,15 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     private Cursor getSuggestions(String query, String[] projectionIn) {
-        // No zero-query suggestions except for global search, to avoid leaking info about apps
-        // that have been used.
-        if (TextUtils.isEmpty(query) && !canRankByLaunchCount()) {
+        Map<String, String> projectionMap = sSearchSuggestionsProjectionMap;
+        // No zero-query suggestions or launch times except for global search,
+        // to avoid leaking info about apps that have been used.
+        if (hasGlobalSearchPermission()) {
+            projectionMap = sGlobalSearchSuggestionsProjectionMap;
+        } else if (TextUtils.isEmpty(query)) {
             return null;
         }
-        return searchApplications(query, projectionIn, sSearchSuggestionsProjectionMap);
+        return searchApplications(query, projectionIn, projectionMap);
     }
 
     /**
@@ -414,8 +379,8 @@ public class ApplicationsProvider extends ContentProvider {
         if (!zeroQuery) {
             qb.appendWhere(buildTokenFilter(query));
         } else {
-            if (canRankByLaunchCount()) {
-                qb.appendWhere(LAUNCH_COUNT + " > 0");
+            if (hasGlobalSearchPermission()) {
+                qb.appendWhere(LAST_RESUME_TIME + " > 0");
             }
         }
         // don't return duplicates when there are two matching tokens for an app
@@ -437,8 +402,8 @@ public class ApplicationsProvider extends ContentProvider {
             orderBy.append("MIN(token_index) != 0, ");
         }
 
-        if (canRankByLaunchCount()) {
-            orderBy.append(LAUNCH_COUNT + " DESC, ");
+        if (hasGlobalSearchPermission()) {
+            orderBy.append(LAST_RESUME_TIME + " DESC, ");
         }
 
         orderBy.append(NAME);
@@ -452,12 +417,12 @@ public class ApplicationsProvider extends ContentProvider {
         // NOTE: Query parameters won't work here since the SQL compiler
         // needs to parse the actual string to know that it can use the
         // index to do a prefix scan.
-        DatabaseUtils.appendEscapedSQLString(filter, 
+        DatabaseUtils.appendEscapedSQLString(filter,
                 DatabaseUtils.getHexCollationKey(filterParam) + "*");
         return filter.toString();
     }
 
-    private static HashMap<String, String> buildSuggestionsProjectionMap() {
+    private static HashMap<String, String> buildSuggestionsProjectionMap(boolean forGlobalSearch) {
         HashMap<String, String> map = new HashMap<String, String>();
         addProjection(map, Applications.ApplicationColumns._ID, _ID);
         addProjection(map, SearchManager.SUGGEST_COLUMN_TEXT_1, NAME);
@@ -469,6 +434,10 @@ public class ApplicationsProvider extends ContentProvider {
         addProjection(map, SearchManager.SUGGEST_COLUMN_ICON_2, "NULL");
         addProjection(map, SearchManager.SUGGEST_COLUMN_SHORTCUT_ID,
                 PACKAGE + " || '/' || " + CLASS);
+        if (forGlobalSearch) {
+            addProjection(map, SearchManager.SUGGEST_COLUMN_LAST_ACCESS_HINT,
+                    LAST_RESUME_TIME);
+        }
         return map;
     }
 
@@ -496,10 +465,10 @@ public class ApplicationsProvider extends ContentProvider {
      * @param packageName Name of package whose activities to update.
      *        If {@code null}, all packages are updated.
      */
-    private void updateApplicationsList(String packageName) {
+    private synchronized void updateApplicationsList(String packageName) {
         if (DBG) Log.d(TAG, "Updating database (packageName = " + packageName + ")...");
-        
-        DatabaseUtils.InsertHelper inserter = 
+
+        DatabaseUtils.InsertHelper inserter =
                 new DatabaseUtils.InsertHelper(mDb, APPLICATIONS_TABLE);
         int nameCol = inserter.getColumnIndex(NAME);
         int descriptionCol = inserter.getColumnIndex(DESCRIPTION);
@@ -507,8 +476,9 @@ public class ApplicationsProvider extends ContentProvider {
         int classCol = inserter.getColumnIndex(CLASS);
         int iconCol = inserter.getColumnIndex(ICON);
         int launchCountCol = inserter.getColumnIndex(LAUNCH_COUNT);
+        int lastResumeTimeCol = inserter.getColumnIndex(LAST_RESUME_TIME);
 
-        Map<String, Integer> launchCounts = fetchLaunchCounts();
+        Map<String, PkgUsageStats> usageStats = fetchUsageStats();
 
         mDb.beginTransaction();
         try {
@@ -533,9 +503,14 @@ public class ApplicationsProvider extends ContentProvider {
                 }
 
                 String activityPackageName = info.activityInfo.applicationInfo.packageName;
-                Integer launchCount = launchCounts.get(activityPackageName);
-                if (launchCount == null) {
-                    launchCount = 0;
+                PkgUsageStats stats = usageStats.get(activityPackageName);
+                int launchCount = 0;
+                long lastResumeTime = 0;
+                if (stats != null) {
+                    launchCount = stats.launchCount;
+                    if (stats.componentResumeTimes.containsKey(activityClassName)) {
+                        lastResumeTime = stats.componentResumeTimes.get(activityClassName);
+                    }
                 }
 
                 String icon = getActivityIconUri(info.activityInfo);
@@ -546,6 +521,7 @@ public class ApplicationsProvider extends ContentProvider {
                 inserter.bind(classCol, activityClassName);
                 inserter.bind(iconCol, icon);
                 inserter.bind(launchCountCol, launchCount);
+                inserter.bind(lastResumeTimeCol, lastResumeTime);
                 inserter.execute();
             }
             mDb.setTransactionSuccessful();
@@ -562,24 +538,37 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     @VisibleForTesting
-    protected void updateLaunchCounts() {
-        Map<String, Integer> launchCounts = fetchLaunchCounts();
+    protected synchronized void updateUsageStats() {
+        if (DBG) Log.d(TAG, "Update application usage stats.");
+        Map<String, PkgUsageStats> usageStats = fetchUsageStats();
 
         mDb.beginTransaction();
         try {
-            for (String packageName : launchCounts.keySet()) {
-                ContentValues updatedValues = new ContentValues();
-                updatedValues.put(LAUNCH_COUNT, launchCounts.get(packageName));
+            for (Map.Entry<String, PkgUsageStats> statsEntry : usageStats.entrySet()) {
+                ContentValues updatedLaunchCount = new ContentValues();
+                String packageName = statsEntry.getKey();
+                PkgUsageStats stats = statsEntry.getValue();
+                updatedLaunchCount.put(LAUNCH_COUNT, stats.launchCount);
 
-                mDb.update(APPLICATIONS_TABLE, updatedValues,
+                mDb.update(APPLICATIONS_TABLE, updatedLaunchCount,
                         PACKAGE + " = ?", new String[] { packageName });
+
+                for (Map.Entry<String, Long> crtEntry: stats.componentResumeTimes.entrySet()) {
+                    ContentValues updatedLastResumeTime = new ContentValues();
+                    String componentName = crtEntry.getKey();
+                    updatedLastResumeTime.put(LAST_RESUME_TIME, crtEntry.getValue());
+
+                    mDb.update(APPLICATIONS_TABLE, updatedLastResumeTime,
+                            PACKAGE + " = ? AND " + CLASS + " = ?",
+                            new String[] { packageName, componentName });
+                }
             }
             mDb.setTransactionSuccessful();
         } finally {
             mDb.endTransaction();
         }
 
-        if (DBG) Log.d(TAG, "Finished updating application launch counts in database.");
+        if (DBG) Log.d(TAG, "Finished updating application usage stats in database.");
     }
 
     private String getActivityIconUri(ActivityInfo activityInfo) {
@@ -648,17 +637,25 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     @VisibleForTesting
-    protected Map<String, Integer> fetchLaunchCounts() {
+    protected Map<String, PkgUsageStats> fetchUsageStats() {
         try {
             ActivityManager activityManager = (ActivityManager)
                     getContext().getSystemService(Context.ACTIVITY_SERVICE);
 
-            Map<String, Integer> allPackageLaunchCounts = activityManager.getAllPackageLaunchCounts();
-            return allPackageLaunchCounts;
+            if (activityManager != null) {
+                Map<String, PkgUsageStats> stats = new HashMap<String, PkgUsageStats>();
+                PkgUsageStats[] pkgUsageStats = activityManager.getAllPackageUsageStats();
+                if (pkgUsageStats != null) {
+                    for (PkgUsageStats pus : pkgUsageStats) {
+                        stats.put(pus.packageName, pus);
+                    }
+                }
+                return stats;
+            }
         } catch (Exception e) {
-            Log.w(TAG, "Could not fetch launch counts", e);
-            return new HashMap<String, Integer>();
+            Log.w(TAG, "Could not fetch usage stats", e);
         }
+        return new HashMap<String, PkgUsageStats>();
     }
 
     @VisibleForTesting
@@ -667,10 +664,10 @@ public class ApplicationsProvider extends ContentProvider {
     }
 
     @VisibleForTesting
-    protected boolean canRankByLaunchCount() {
-        // Only the global search system is allowed to rank apps by launch count.
-        // Without this restriction the ApplicationsProvider could leak
-        // information about the user's behavior to applications.
+    protected boolean hasGlobalSearchPermission() {
+        // Only the global-search system is allowed to see the usage stats of
+        // applications. Without this restriction the ApplicationsProvider
+        // could leak information about the user's behavior to applications.
         return (PackageManager.PERMISSION_GRANTED ==
                 getContext().checkCallingPermission(android.Manifest.permission.GLOBAL_SEARCH));
     }

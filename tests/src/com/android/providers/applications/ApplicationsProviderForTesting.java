@@ -17,7 +17,9 @@
 package com.android.providers.applications;
 
 import android.content.pm.PackageManager;
+import com.android.internal.os.PkgUsageStats;
 
+import java.util.HashMap;
 import java.util.Map;
 
 /**
@@ -29,7 +31,7 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
 
     private MockActivityManager mMockActivityManager;
 
-    private boolean mCanRankByLaunchCount;
+    private boolean mHasGlobalSearchPermission;
 
     @Override
     protected PackageManager getPackageManager() {
@@ -41,24 +43,24 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
     }
 
     @Override
-    protected Map<String, Integer> fetchLaunchCounts() {
-        return mMockActivityManager.getAllPackageLaunchCounts();
+    protected Map<String, PkgUsageStats> fetchUsageStats() {
+        Map<String, PkgUsageStats> stats = new HashMap<String, PkgUsageStats>();
+        for (PkgUsageStats pus : mMockActivityManager.getAllPackageUsageStats()) {
+            stats.put(pus.packageName, pus);
+        }
+        return stats;
     }
 
     protected void setMockActivityManager(MockActivityManager mockActivityManager) {
         mMockActivityManager = mockActivityManager;
     }
 
-    protected void setCanRankByLaunchCount(boolean canRankByLaunchCount) {
-        mCanRankByLaunchCount = canRankByLaunchCount;
+    protected void setHasGlobalSearchPermission(boolean hasGlobalSearchPermission) {
+        mHasGlobalSearchPermission = hasGlobalSearchPermission;
     }
 
     @Override
-    protected boolean canRankByLaunchCount() {
-        return mCanRankByLaunchCount;
-    }
-
-    @Override
-    protected void scheduleRegularLaunchCountUpdates() {
+    protected boolean hasGlobalSearchPermission() {
+        return mHasGlobalSearchPermission;
     }
 }

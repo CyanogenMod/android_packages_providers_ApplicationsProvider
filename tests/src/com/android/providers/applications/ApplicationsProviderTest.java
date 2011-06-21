@@ -16,9 +16,11 @@
 
 package com.android.providers.applications;
 
+import android.app.SearchManager;
 import android.content.ComponentName;
 import android.content.Context;
 import android.database.Cursor;
+import android.net.Uri;
 import android.provider.Applications;
 import android.test.ProviderTestCase2;
 import android.test.suitebuilder.annotation.LargeTest;
@@ -94,6 +96,7 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         mockPackageManager.addPackage("AlphabeticB", new ComponentName("b", "b.BView"));
         mockPackageManager.addPackage("AlphabeticC", new ComponentName("c", "c.CView"));
         mockPackageManager.addPackage("AlphabeticD", new ComponentName("d", "d.DView"));
+        mockPackageManager.addPackage("AlphabeticD2", new ComponentName("d", "d.DView2"));
     }
 
     public void testSearch_singleResult() {
@@ -109,24 +112,25 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
     }
 
     public void testSearch_orderingIsAlphabeticByDefault() {
-        testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD");
+        testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD",
+                "AlphabeticD2");
     }
 
     public void testSearch_emptySearchQueryReturnsEverything() {
         testSearch("",
-                "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD",
+                "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD", "AlphabeticD2",
                 "Ebay", "Email", "Fakeapp");
     }
 
-    public void testSearch_appsAreRankedByLaunchCountOnStartup() throws Exception {
-        mMockActivityManager.addLaunchCount("d", 3);
-        mMockActivityManager.addLaunchCount("b", 1);
-        // Missing launch count for "a".
-        mMockActivityManager.addLaunchCount("c", 0);
+    public void testSearch_appsAreRankedByUsageTimeOnStartup() throws Exception {
+        mMockActivityManager.addLastResumeTime("d", "d.DView", 3);
+        mMockActivityManager.addLastResumeTime("b", "b.BView", 1);
+        // Missing usage time for "a".
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 0);
 
         // Launch count database is populated on startup.
         mProvider = createNewProvider(getMockContext());
-        mProvider.setCanRankByLaunchCount(true);
+        mProvider.setHasGlobalSearchPermission(true);
         initProvider(mProvider);
 
         // Override the previous provider with the new instance in the
@@ -135,24 +139,56 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
 
         // New ranking: D, B, A, C (first by launch count, then
         // - if the launch counts of two apps are equal - alphabetically)
-        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC");
+        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC",
+                "AlphabeticD2");
     }
 
-    public void testSearch_appsAreRankedByLaunchCountAfterScheduledUpdate() {
-        mProvider.setCanRankByLaunchCount(true);
+    public void testSearch_appsAreRankedByResumeTimeAfterUpdate() {
+        mProvider.setHasGlobalSearchPermission(true);
 
-        mMockActivityManager.addLaunchCount("d", 3);
-        mMockActivityManager.addLaunchCount("b", 1);
+        mMockActivityManager.addLastResumeTime("d", "d.DView", 3);
+        mMockActivityManager.addLastResumeTime("b", "b.BView", 1);
         // Missing launch count for "a".
-        mMockActivityManager.addLaunchCount("c", 0);
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 0);
 
-        // Fetch new data from launch count provider (in the real instance this
-        // is scheduled).
-        mProvider.updateLaunchCounts();
+        // Fetch new data from usage stat provider (in the real instance this
+        // is triggered by a zero-query from global search).
+        mProvider.updateUsageStats();
 
         // New ranking: D, B, A, C (first by launch count, then
         // - if the launch counts of two apps are equal - alphabetically)
-        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC");
+        testSearch("alphabetic", "AlphabeticD", "AlphabeticB", "AlphabeticA", "AlphabeticC",
+                "AlphabeticD2");
+    }
+
+    public void testSearch_noLastAccessTimesWithoutPermission() {
+        mProvider.setHasGlobalSearchPermission(false);
+        mMockActivityManager.addLastResumeTime("d", "d.DView", 1);
+        mMockActivityManager.addLastResumeTime("b", "b.BView", 2);
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 3);
+
+        assertNull(getGlobalSearchCursor("", false));
+
+        Cursor cursor = getGlobalSearchCursor("alphabetic", false);
+        assertEquals(-1, cursor.getColumnIndex(SearchManager.SUGGEST_COLUMN_LAST_ACCESS_HINT));
+    }
+
+    public void testSearch_lastAccessTimes() {
+        mProvider.setHasGlobalSearchPermission(true);
+        mMockActivityManager.addLastResumeTime("d", "d.DView", 1);
+        mMockActivityManager.addLastResumeTime("b", "b.BView", 2);
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 3);
+
+        testLastAccessTimes("", true, 3, 2, 1, 0, 0, 0, 0, 0, 0, 0);
+
+        testLastAccessTimes("alphabetic", true, 3, 2, 1, 0, 0);
+
+        // Update the last resume time of "c".
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 5);
+        // Without a refresh, we should see the same results as before.
+        testLastAccessTimes("alphabetic", false, 3, 2, 1, 0, 0);
+        // If we refresh, we should see the change.
+        testLastAccessTimes("alphabetic", true, 5, 2, 1, 0, 0);
     }
 
     /**
@@ -162,19 +198,20 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
      */
     public void testSearch_notAllowedToRankByLaunchCount() {
         // Simulate non-privileged calling application.
-        mProvider.setCanRankByLaunchCount(false);
+        mProvider.setHasGlobalSearchPermission(false);
 
-        mMockActivityManager.addLaunchCount("d", 3);
-        mMockActivityManager.addLaunchCount("b", 1);
-        mMockActivityManager.addLaunchCount("a", 0);
-        mMockActivityManager.addLaunchCount("c", 0);
+        mMockActivityManager.addLastResumeTime("d", "d.DView", 3);
+        mMockActivityManager.addLastResumeTime("b", "b.BView", 1);
+        mMockActivityManager.addLastResumeTime("a", "a.AView", 0);
+        mMockActivityManager.addLastResumeTime("c", "c.CView", 0);
 
         // Fetch new data from launch count provider.
-        mProvider.updateLaunchCounts();
+        mProvider.updateUsageStats();
 
         // Launch count information mustn't be leaked - ranking is still
         // alphabetic.
-        testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD");
+        testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD",
+                "AlphabeticD2");
     }
 
     private void testSearch(String searchQuery, String... expectedResultsInOrder) {
@@ -202,6 +239,39 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                         expectedResultsInOrder[i], cursor.getString(nameIndex));
                 cursor.moveToNext();
             }
+        }
+    }
+
+    private Cursor getGlobalSearchCursor(String searchQuery, boolean refresh) {
+        Uri.Builder uriBuilder = Applications.CONTENT_URI.buildUpon();
+        uriBuilder.appendPath(SearchManager.SUGGEST_URI_PATH_QUERY).appendPath(searchQuery);
+        if (refresh) {
+            uriBuilder.appendQueryParameter(ApplicationsProvider.REFRESH_STATS, "");
+        }
+        return getMockContentResolver().query(uriBuilder.build(), null, null, null, null);
+    }
+
+    private void testLastAccessTimes(String searchQuery, boolean refresh,
+            int... expectedLastAccessTimesInOrder) {
+        Cursor cursor = getGlobalSearchCursor(searchQuery, refresh);
+
+        assertNotNull(cursor);
+        assertFalse(cursor.isClosed());
+
+        verifyLastAccessTimes(cursor, expectedLastAccessTimesInOrder);
+
+        cursor.close();
+    }
+
+    private void verifyLastAccessTimes(Cursor cursor, int... expectedLastAccessTimesInOrder) {
+        cursor.moveToFirst();
+        int lastAccessTimeIndex = cursor.getColumnIndex(
+                SearchManager.SUGGEST_COLUMN_LAST_ACCESS_HINT);
+        // Verify that the actual results match the expected ones.
+        for (int i = 0; i < cursor.getCount(); i++) {
+            assertEquals("Wrong last-access time at position " + i,
+                    expectedLastAccessTimesInOrder[i], cursor.getInt(lastAccessTimeIndex));
+            cursor.moveToNext();
         }
     }
 

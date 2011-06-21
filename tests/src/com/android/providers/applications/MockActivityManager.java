@@ -15,6 +15,8 @@
  */
 package com.android.providers.applications;
 
+import com.android.internal.os.PkgUsageStats;
+
 import java.util.HashMap;
 import java.util.Map;
 
@@ -24,13 +26,17 @@ import java.util.Map;
  */
 public class MockActivityManager {
 
-    private Map<String, Integer> mPackageLaunchCounts = new HashMap<String, Integer>();
+    private Map<String, PkgUsageStats> mPackageUsageStats = new HashMap<String, PkgUsageStats>();
 
-    public void addLaunchCount(String packageName, int launchCount) {
-        mPackageLaunchCounts.put(packageName, launchCount);
+    public void addLastResumeTime(String packageName, String componentName, long lastResumeTime) {
+        if (!mPackageUsageStats.containsKey(packageName)) {
+            PkgUsageStats stats = new PkgUsageStats(packageName, 1, 0, new HashMap<String, Long>());
+            mPackageUsageStats.put(packageName, stats);
+        }
+        mPackageUsageStats.get(packageName).componentResumeTimes.put(componentName, lastResumeTime);
     }
 
-    public Map<String, Integer> getAllPackageLaunchCounts() {
-        return mPackageLaunchCounts;
+    public PkgUsageStats[] getAllPackageUsageStats() {
+        return mPackageUsageStats.values().toArray(new PkgUsageStats[mPackageUsageStats.size()]);
     }
 }
