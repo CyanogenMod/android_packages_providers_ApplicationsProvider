@@ -117,8 +117,6 @@ public class ApplicationsProvider extends ContentProvider {
     // Handler that runs DB updates.
     private Handler mHandler;
 
-    private Runnable onApplicationsListUpdated;
-
     /**
      * We delay application updates by this many millis to avoid doing more than one update to the
      * applications list within this window.
@@ -177,13 +175,19 @@ public class ApplicationsProvider extends ContentProvider {
         // Start thread that runs app updates
         HandlerThread thread = new HandlerThread("ApplicationsProviderUpdater", THREAD_PRIORITY);
         thread.start();
-        mHandler = new UpdateHandler(thread.getLooper());
+        mHandler = createHandler(thread.getLooper());
         // Kick off first apps update
         postUpdateAll();
         return true;
     }
 
-    private class UpdateHandler extends Handler {
+    @VisibleForTesting
+    Handler createHandler(Looper looper) {
+        return new UpdateHandler(looper);
+    }
+
+    @VisibleForTesting
+    class UpdateHandler extends Handler {
 
         public UpdateHandler(Looper looper) {
             super(looper);
@@ -503,26 +507,29 @@ public class ApplicationsProvider extends ContentProvider {
                 }
 
                 String activityPackageName = info.activityInfo.applicationInfo.packageName;
-                PkgUsageStats stats = usageStats.get(activityPackageName);
-                int launchCount = 0;
-                long lastResumeTime = 0;
-                if (stats != null) {
-                    launchCount = stats.launchCount;
-                    if (stats.componentResumeTimes.containsKey(activityClassName)) {
-                        lastResumeTime = stats.componentResumeTimes.get(activityClassName);
+                if (DBG) Log.d(TAG, "activity " + activityPackageName + "/" + activityClassName);
+                if (isComponentEnabled(manager, activityPackageName, activityClassName)) {
+                    PkgUsageStats stats = usageStats.get(activityPackageName);
+                    int launchCount = 0;
+                    long lastResumeTime = 0;
+                    if (stats != null) {
+                        launchCount = stats.launchCount;
+                        if (stats.componentResumeTimes.containsKey(activityClassName)) {
+                            lastResumeTime = stats.componentResumeTimes.get(activityClassName);
+                        }
                     }
-                }
 
-                String icon = getActivityIconUri(info.activityInfo);
-                inserter.prepareForInsert();
-                inserter.bind(nameCol, title);
-                inserter.bind(descriptionCol, description);
-                inserter.bind(packageCol, activityPackageName);
-                inserter.bind(classCol, activityClassName);
-                inserter.bind(iconCol, icon);
-                inserter.bind(launchCountCol, launchCount);
-                inserter.bind(lastResumeTimeCol, lastResumeTime);
-                inserter.execute();
+                    String icon = getActivityIconUri(info.activityInfo);
+                    inserter.prepareForInsert();
+                    inserter.bind(nameCol, title);
+                    inserter.bind(descriptionCol, description);
+                    inserter.bind(packageCol, activityPackageName);
+                    inserter.bind(classCol, activityClassName);
+                    inserter.bind(iconCol, icon);
+                    inserter.bind(launchCountCol, launchCount);
+                    inserter.bind(lastResumeTimeCol, lastResumeTime);
+                    inserter.execute();
+                }
             }
             mDb.setTransactionSuccessful();
         } finally {
@@ -530,11 +537,23 @@ public class ApplicationsProvider extends ContentProvider {
             inserter.close();
         }
 
-        if (onApplicationsListUpdated != null) {
-            onApplicationsListUpdated.run();
+        if (DBG) Log.d(TAG, "Finished updating database.");
+    }
+
+    private boolean isComponentEnabled(PackageManager manager, String packageName,
+            String componentName) {
+        if (manager.getApplicationEnabledSetting(packageName) ==
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+            if (DBG) Log.d(TAG, "DISABLED package " + packageName);
+            return false;
+        }
+        if (manager.getComponentEnabledSetting(new ComponentName(packageName, componentName)) ==
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+            if (DBG) Log.d(TAG, "DISABLED component " + packageName + "/" + componentName);
+            return false;
         }
 
-        if (DBG) Log.d(TAG, "Finished updating database.");
+        return true;
     }
 
     @VisibleForTesting
@@ -670,11 +689,6 @@ public class ApplicationsProvider extends ContentProvider {
         // could leak information about the user's behavior to applications.
         return (PackageManager.PERMISSION_GRANTED ==
                 getContext().checkCallingPermission(android.Manifest.permission.GLOBAL_SEARCH));
-    }
-
-    @VisibleForTesting
-    protected void setOnApplicationsListUpdated(Runnable onApplicationsListUpdated) {
-        this.onApplicationsListUpdated = onApplicationsListUpdated;
     }
 
 }

@@ -19,11 +19,12 @@ package com.android.providers.applications;
 import android.app.SearchManager;
 import android.content.ComponentName;
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.database.Cursor;
 import android.net.Uri;
 import android.provider.Applications;
 import android.test.ProviderTestCase2;
-import android.test.suitebuilder.annotation.LargeTest;
+import android.test.suitebuilder.annotation.SmallTest;
 
 import java.util.concurrent.FutureTask;
 
@@ -36,7 +37,7 @@ import java.util.concurrent.FutureTask;
  * is also created in an isolated context so it doesn't interfere with the
  * database of the actual ApplicationsProvider installed on the device.
  */
-@LargeTest
+@SmallTest
 public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProviderForTesting> {
 
     private ApplicationsProviderForTesting mProvider;
@@ -52,7 +53,6 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         super.setUp();
         mProvider = getProvider();
         mMockActivityManager = new MockActivityManager();
-        initProvider(mProvider);
     }
 
     /**
@@ -62,21 +62,16 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         // Decouple the provider from Android's real list of applications.
         MockPackageManager mockPackageManager = new MockPackageManager();
         addDefaultTestPackages(mockPackageManager);
+
+        initProvider(provider, mockPackageManager);
+    }
+
+    private void initProvider(ApplicationsProviderForTesting provider,
+            MockPackageManager mockPackageManager) throws Exception {
         provider.setMockPackageManager(mockPackageManager);
         provider.setMockActivityManager(mMockActivityManager);
 
-        // We need to wait for the applications database to be updated (it's
-        // updated with a slight delay by a separate thread) before we can use
-        // the ApplicationsProvider.
-        Runnable markerRunnable = new Runnable() {
-            @Override
-            public void run() {
-            }
-        };
-        FutureTask<Void> onApplicationsListUpdated = new FutureTask<Void>(markerRunnable, null);
-
-        provider.setOnApplicationsListUpdated(onApplicationsListUpdated);
-        onApplicationsListUpdated.get();
+        assertTrue(provider.dispatchNextMessage());
     }
 
     /**
@@ -99,24 +94,29 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         mockPackageManager.addPackage("AlphabeticD2", new ComponentName("d", "d.DView2"));
     }
 
-    public void testSearch_singleResult() {
+    public void testSearch_singleResult() throws Exception {
+        initProvider(mProvider);
         testSearch("ema", "Email");
     }
 
-    public void testSearch_multipleResults() {
+    public void testSearch_multipleResults() throws Exception {
+        initProvider(mProvider);
         testSearch("e", "Ebay", "Email");
     }
 
-    public void testSearch_noResults() {
+    public void testSearch_noResults() throws Exception {
+        initProvider(mProvider);
         testSearch("nosuchapp");
     }
 
-    public void testSearch_orderingIsAlphabeticByDefault() {
+    public void testSearch_orderingIsAlphabeticByDefault() throws Exception {
+        initProvider(mProvider);
         testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD",
                 "AlphabeticD2");
     }
 
-    public void testSearch_emptySearchQueryReturnsEverything() {
+    public void testSearch_emptySearchQueryReturnsEverything() throws Exception {
+        initProvider(mProvider);
         testSearch("",
                 "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD", "AlphabeticD2",
                 "Ebay", "Email", "Fakeapp");
@@ -129,13 +129,9 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         mMockActivityManager.addLastResumeTime("c", "c.CView", 0);
 
         // Launch count database is populated on startup.
-        mProvider = createNewProvider(getMockContext());
         mProvider.setHasGlobalSearchPermission(true);
-        initProvider(mProvider);
 
-        // Override the previous provider with the new instance in the
-        // ContentResolver.
-        getMockContentResolver().addProvider(Applications.AUTHORITY, mProvider);
+        initProvider(mProvider);
 
         // New ranking: D, B, A, C (first by launch count, then
         // - if the launch counts of two apps are equal - alphabetically)
@@ -143,7 +139,8 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                 "AlphabeticD2");
     }
 
-    public void testSearch_appsAreRankedByResumeTimeAfterUpdate() {
+    public void testSearch_appsAreRankedByResumeTimeAfterUpdate() throws Exception {
+        initProvider(mProvider);
         mProvider.setHasGlobalSearchPermission(true);
 
         mMockActivityManager.addLastResumeTime("d", "d.DView", 3);
@@ -161,7 +158,8 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                 "AlphabeticD2");
     }
 
-    public void testSearch_noLastAccessTimesWithoutPermission() {
+    public void testSearch_noLastAccessTimesWithoutPermission() throws Exception {
+        initProvider(mProvider);
         mProvider.setHasGlobalSearchPermission(false);
         mMockActivityManager.addLastResumeTime("d", "d.DView", 1);
         mMockActivityManager.addLastResumeTime("b", "b.BView", 2);
@@ -173,7 +171,8 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         assertEquals(-1, cursor.getColumnIndex(SearchManager.SUGGEST_COLUMN_LAST_ACCESS_HINT));
     }
 
-    public void testSearch_lastAccessTimes() {
+    public void testSearch_lastAccessTimes() throws Exception {
+        initProvider(mProvider);
         mProvider.setHasGlobalSearchPermission(true);
         mMockActivityManager.addLastResumeTime("d", "d.DView", 1);
         mMockActivityManager.addLastResumeTime("b", "b.BView", 2);
@@ -196,7 +195,8 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
      * is a privileged application - ordering apps by launch count when asked
      * by a regular application would leak information about user behavior.
      */
-    public void testSearch_notAllowedToRankByLaunchCount() {
+    public void testSearch_notAllowedToRankByLaunchCount() throws Exception {
+        initProvider(mProvider);
         // Simulate non-privileged calling application.
         mProvider.setHasGlobalSearchPermission(false);
 
@@ -212,6 +212,34 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
         // alphabetic.
         testSearch("alphabetic", "AlphabeticA", "AlphabeticB", "AlphabeticC", "AlphabeticD",
                 "AlphabeticD2");
+    }
+
+    public void testSearch_disabledPackage() throws Exception {
+        MockPackageManager mockPackageManager = new MockPackageManager();
+        mockPackageManager.addPackage("DisabledPackageApp1",
+                new ComponentName("dp", "dp.DisView1"));
+        mockPackageManager.addPackage("DisabledPackageApp2",
+                new ComponentName("dp", "dp.DisView2"),
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
+        initProvider(mProvider, mockPackageManager);
+
+        mProvider.setHasGlobalSearchPermission(true);
+        testSearch("dis");
+    }
+
+    public void testSearch_disabledComponent() throws Exception {
+        MockPackageManager mockPackageManager = new MockPackageManager();
+        mockPackageManager.addPackage("DisabledApp1", new ComponentName("da", "da.DaView1"),
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED);
+        mockPackageManager.addPackage("DisabledApp2", new ComponentName("da", "da.DaView2"),
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                PackageManager.COMPONENT_ENABLED_STATE_DEFAULT);
+        initProvider(mProvider, mockPackageManager);
+
+        mProvider.setHasGlobalSearchPermission(true);
+        testSearch("dis", "DisabledApp2");
     }
 
     private void testSearch(String searchQuery, String... expectedResultsInOrder) {
@@ -273,12 +301,5 @@ public class ApplicationsProviderTest extends ProviderTestCase2<ApplicationsProv
                     expectedLastAccessTimesInOrder[i], cursor.getInt(lastAccessTimeIndex));
             cursor.moveToNext();
         }
-    }
-
-    private ApplicationsProviderForTesting createNewProvider(Context context) throws Exception {
-        ApplicationsProviderForTesting newProviderInstance =
-                ApplicationsProviderForTesting.class.newInstance();
-        newProviderInstance.attachInfo(context, null);
-        return newProviderInstance;
     }
 }

@@ -17,9 +17,15 @@
 package com.android.providers.applications;
 
 import android.content.pm.PackageManager;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Message;
+
 import com.android.internal.os.PkgUsageStats;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -32,6 +38,8 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
     private MockActivityManager mMockActivityManager;
 
     private boolean mHasGlobalSearchPermission;
+
+    private MockUpdateHandler mMockUpdateHandler;
 
     @Override
     protected PackageManager getPackageManager() {
@@ -62,5 +70,39 @@ public class ApplicationsProviderForTesting extends ApplicationsProvider {
     @Override
     protected boolean hasGlobalSearchPermission() {
         return mHasGlobalSearchPermission;
+    }
+
+    @Override
+    Handler createHandler(Looper looper) {
+        mMockUpdateHandler = new MockUpdateHandler(looper);
+        return mMockUpdateHandler;
+    }
+
+    public boolean dispatchNextMessage() {
+        return mMockUpdateHandler.dispatchNextMessage();
+    }
+
+    private class MockUpdateHandler extends UpdateHandler {
+
+        List<Message> mMessages = new ArrayList<Message>();
+
+        MockUpdateHandler(Looper looper) {
+            super(looper);
+        }
+
+        @Override
+        public boolean sendMessageAtTime(Message msg, long uptimeMillis) {
+            mMessages.add(msg);
+            return true;
+        }
+
+        public boolean dispatchNextMessage() {
+            if (!mMessages.isEmpty()) {
+                dispatchMessage(mMessages.remove(0));
+                return true;
+            } else {
+                return false;
+            }
+        }
     }
 }
