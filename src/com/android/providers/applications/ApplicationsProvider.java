@@ -82,6 +82,7 @@ public class ApplicationsProvider extends ContentProvider {
 
     // Messages for mHandler
     private static final int MSG_UPDATE_ALL = 0;
+    private static final int MSG_UPDATE_PACKAGE = 1;
 
     public static final String _ID = "_id";
     public static final String NAME = "name";
@@ -150,6 +151,11 @@ public class ApplicationsProvider extends ContentProvider {
         public void onSomePackagesChanged() {
             postUpdateAll();
         }
+
+        @Override
+        public void onPackageModified(String packageName) {
+            postUpdatePackage(packageName);
+        }
     }
 
     // Broadcast receiver for updating applications list when the locale changes.
@@ -199,6 +205,9 @@ public class ApplicationsProvider extends ContentProvider {
                 case MSG_UPDATE_ALL:
                     updateApplicationsList(null);
                     break;
+                case MSG_UPDATE_PACKAGE:
+                    updateApplicationsList((String) msg.obj);
+                    break;
                 default:
                     Log.e(TAG, "Unknown message: " + msg.what);
                     break;
@@ -215,6 +224,13 @@ public class ApplicationsProvider extends ContentProvider {
         // Post a new update
         Message msg = Message.obtain();
         msg.what = MSG_UPDATE_ALL;
+        mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
+    }
+
+    private void postUpdatePackage(String packageName) {
+        Message msg = Message.obtain();
+        msg.what = MSG_UPDATE_PACKAGE;
+        msg.obj = packageName;
         mHandler.sendMessageDelayed(msg, UPDATE_DELAY_MILLIS);
     }
 
