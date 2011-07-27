@@ -558,18 +558,26 @@ public class ApplicationsProvider extends ContentProvider {
 
     private boolean isComponentEnabled(PackageManager manager, String packageName,
             String componentName) {
-        if (manager.getApplicationEnabledSetting(packageName) ==
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-            if (DBG) Log.d(TAG, "DISABLED package " + packageName);
-            return false;
-        }
-        if (manager.getComponentEnabledSetting(new ComponentName(packageName, componentName)) ==
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-            if (DBG) Log.d(TAG, "DISABLED component " + packageName + "/" + componentName);
-            return false;
-        }
+        try {
+            if (manager.getApplicationEnabledSetting(packageName) ==
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                if (DBG) Log.d(TAG, "DISABLED package " + packageName);
+                return false;
+            }
+            if (manager.getComponentEnabledSetting(new ComponentName(packageName, componentName)) ==
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                if (DBG) Log.d(TAG, "DISABLED component " + packageName + "/" + componentName);
+                return false;
+            }
 
-        return true;
+            return true;
+        } catch (Exception e) {
+            if (DBG) {
+                Log.w(TAG, "Couldn't query component enabled status " +
+                    packageName + "/" + componentName + ": " + e);
+            }
+            return false;
+        }
     }
 
     @VisibleForTesting
