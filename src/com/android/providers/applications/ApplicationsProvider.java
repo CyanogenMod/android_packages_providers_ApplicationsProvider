@@ -524,28 +524,26 @@ public class ApplicationsProvider extends ContentProvider {
 
                 String activityPackageName = info.activityInfo.applicationInfo.packageName;
                 if (DBG) Log.d(TAG, "activity " + activityPackageName + "/" + activityClassName);
-                if (isComponentEnabled(manager, activityPackageName, activityClassName)) {
-                    PkgUsageStats stats = usageStats.get(activityPackageName);
-                    int launchCount = 0;
-                    long lastResumeTime = 0;
-                    if (stats != null) {
-                        launchCount = stats.launchCount;
-                        if (stats.componentResumeTimes.containsKey(activityClassName)) {
-                            lastResumeTime = stats.componentResumeTimes.get(activityClassName);
-                        }
+                PkgUsageStats stats = usageStats.get(activityPackageName);
+                int launchCount = 0;
+                long lastResumeTime = 0;
+                if (stats != null) {
+                    launchCount = stats.launchCount;
+                    if (stats.componentResumeTimes.containsKey(activityClassName)) {
+                        lastResumeTime = stats.componentResumeTimes.get(activityClassName);
                     }
-
-                    String icon = getActivityIconUri(info.activityInfo);
-                    inserter.prepareForInsert();
-                    inserter.bind(nameCol, title);
-                    inserter.bind(descriptionCol, description);
-                    inserter.bind(packageCol, activityPackageName);
-                    inserter.bind(classCol, activityClassName);
-                    inserter.bind(iconCol, icon);
-                    inserter.bind(launchCountCol, launchCount);
-                    inserter.bind(lastResumeTimeCol, lastResumeTime);
-                    inserter.execute();
                 }
+
+                String icon = getActivityIconUri(info.activityInfo);
+                inserter.prepareForInsert();
+                inserter.bind(nameCol, title);
+                inserter.bind(descriptionCol, description);
+                inserter.bind(packageCol, activityPackageName);
+                inserter.bind(classCol, activityClassName);
+                inserter.bind(iconCol, icon);
+                inserter.bind(launchCountCol, launchCount);
+                inserter.bind(lastResumeTimeCol, lastResumeTime);
+                inserter.execute();
             }
             mDb.setTransactionSuccessful();
         } finally {
@@ -554,30 +552,6 @@ public class ApplicationsProvider extends ContentProvider {
         }
 
         if (DBG) Log.d(TAG, "Finished updating database.");
-    }
-
-    private boolean isComponentEnabled(PackageManager manager, String packageName,
-            String componentName) {
-        try {
-            if (manager.getApplicationEnabledSetting(packageName) ==
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                if (DBG) Log.d(TAG, "DISABLED package " + packageName);
-                return false;
-            }
-            if (manager.getComponentEnabledSetting(new ComponentName(packageName, componentName)) ==
-                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                if (DBG) Log.d(TAG, "DISABLED component " + packageName + "/" + componentName);
-                return false;
-            }
-
-            return true;
-        } catch (Exception e) {
-            if (DBG) {
-                Log.w(TAG, "Couldn't query component enabled status " +
-                    packageName + "/" + componentName + ": " + e);
-            }
-            return false;
-        }
     }
 
     @VisibleForTesting
