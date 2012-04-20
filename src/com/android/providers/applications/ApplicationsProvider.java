@@ -174,7 +174,7 @@ public class ApplicationsProvider extends ContentProvider {
     public boolean onCreate() {
         createDatabase();
         // Listen for package changes
-        new MyPackageMonitor().register(getContext(), true);
+        new MyPackageMonitor().register(getContext(), null, true);
         // Listen for locale changes
         IntentFilter localeFilter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
         getContext().registerReceiver(mLocaleChangeReceiver, localeFilter);
