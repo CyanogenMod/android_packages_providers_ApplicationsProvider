@@ -173,17 +173,17 @@ public class ApplicationsProvider extends ContentProvider {
     @Override
     public boolean onCreate() {
         createDatabase();
-        // Listen for package changes
-        new MyPackageMonitor().register(getContext(), null, true);
-        // Listen for locale changes
-        IntentFilter localeFilter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
-        getContext().registerReceiver(mLocaleChangeReceiver, localeFilter);
         // Start thread that runs app updates
         HandlerThread thread = new HandlerThread("ApplicationsProviderUpdater", THREAD_PRIORITY);
         thread.start();
         mHandler = createHandler(thread.getLooper());
         // Kick off first apps update
         postUpdateAll();
+        // Listen for package changes
+        new MyPackageMonitor().register(getContext(), null, true);
+        // Listen for locale changes
+        IntentFilter localeFilter = new IntentFilter(Intent.ACTION_LOCALE_CHANGED);
+        getContext().registerReceiver(mLocaleChangeReceiver, localeFilter);
         return true;
     }
 
