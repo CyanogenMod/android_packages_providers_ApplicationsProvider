@@ -17,7 +17,7 @@
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_label" msgid="8842303127802367578">"ผู้ให้บริการแอปพลิเคชันการค้นหา"</string>
-    <string name="search_label" msgid="6182832093760999173">"Apps"</string>
+    <string name="search_label" msgid="6182832093760999173">"แอป"</string>
     <string name="application_desc" msgid="888412554142684749">"แอปพลิเคชัน"</string>
     <string name="settings_description" msgid="966629744054022387">"ชื่อแอปพลิเคชันที่ติดตั้ง"</string>
 </resources>
