@@ -1,5 +1,6 @@
-<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <!--  Copyright (C) 2008 The Android Open Source Project
+      Copyright (C) 2012 The CyanogenMod Project
 
      Licensed under the Apache License, Version 2.0 (the "License");
      you may not use this file except in compliance with the License.
@@ -13,11 +14,10 @@
      See the License for the specific language governing permissions and
      limitations under the License.
  -->
-
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
     <string name="app_label" msgid="8842303127802367578">"Provider zoektoepassingen"</string>
-    <string name="search_label" msgid="6182832093760999173">"Apps"</string>
-    <string name="application_desc" msgid="888412554142684749">"App"</string>
-    <string name="settings_description" msgid="966629744054022387">"Namen van geïnstalleerde apps"</string>
+    <string name="search_label" msgid="6182832093760999173">"Applicaties"</string>
+    <string name="application_desc" msgid="888412554142684749">"Applicatie"</string>
+    <string name="settings_description" msgid="966629744054022387">"Namen van geïnstalleerde applicaties"</string>
 </resources>
