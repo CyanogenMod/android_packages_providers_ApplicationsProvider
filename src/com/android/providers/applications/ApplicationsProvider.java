@@ -396,6 +396,7 @@ public class ApplicationsProvider extends ContentProvider {
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         qb.setTables(APPLICATIONS_LOOKUP_JOIN);
         qb.setProjectionMap(columnMap);
+        String orderBy = null;
         if (!zeroQuery) {
             qb.appendWhere(buildTokenFilter(query));
         } else {
@@ -403,9 +404,11 @@ public class ApplicationsProvider extends ContentProvider {
                 qb.appendWhere(LAST_RESUME_TIME + " > 0");
             }
         }
+        if (!hasGlobalSearchPermission()) {
+            orderBy = getOrderBy(zeroQuery);
+        }
         // don't return duplicates when there are two matching tokens for an app
         String groupBy = APPLICATIONS_TABLE + "." + _ID;
-        String orderBy = getOrderBy(zeroQuery);
         Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, orderBy);
         if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
         return cursor;
