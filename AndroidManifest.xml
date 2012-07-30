@@ -7,6 +7,7 @@
     <application android:process="android.process.acore" android:label="@string/app_label">
 
         <provider android:name="ApplicationsProvider" android:authorities="applications"
+                android:exported="true"
                 android:syncable="false" android:multiprocess="false" />
 
         <activity android:name="ApplicationLauncher"
