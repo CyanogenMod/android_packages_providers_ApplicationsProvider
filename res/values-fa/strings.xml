@@ -16,8 +16,8 @@
 
 <resources xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:xliff="urn:oasis:names:tc:xliff:document:1.2">
-    <string name="app_label" msgid="8842303127802367578">"ارائه دهنده برنامه های جستجو"</string>
-    <string name="search_label" msgid="6182832093760999173">"برنامه های کاربردی"</string>
-    <string name="application_desc" msgid="888412554142684749">"برنامه کاربردی"</string>
-    <string name="settings_description" msgid="966629744054022387">"نام های برنامه های نصب شده"</string>
+    <string name="app_label" msgid="8842303127802367578">"ارائه دهنده برنامه‌های جستجو"</string>
+    <string name="search_label" msgid="6182832093760999173">"برنامه‌های کاربردی"</string>
+    <string name="application_desc" msgid="888412554142684749">"برنامهٔ کاربردی"</string>
+    <string name="settings_description" msgid="966629744054022387">"نام‌های برنامه‌های نصب شده"</string>
 </resources>

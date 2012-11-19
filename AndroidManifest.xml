@@ -7,10 +7,12 @@
     <application android:process="android.process.acore" android:label="@string/app_label">
 
         <provider android:name="ApplicationsProvider" android:authorities="applications"
+                android:exported="true"
                 android:syncable="false" android:multiprocess="false" />
 
         <activity android:name="ApplicationLauncher"
                 android:label="@string/search_label"
+                android:icon="@android:drawable/sym_def_app_icon"
                 android:stateNotNeeded="true"
                 android:excludeFromRecents="true">
 
