@@ -19,5 +19,5 @@
     <string name="app_label" msgid="8842303127802367578">"Iskanje ponudnika programov"</string>
     <string name="search_label" msgid="6182832093760999173">"Google Aplikacije"</string>
     <string name="application_desc" msgid="888412554142684749">"Program"</string>
-    <string name="settings_description" msgid="966629744054022387">"Imena nameščenih programov"</string>
+    <string name="settings_description" msgid="966629744054022387">"Imena nameščenih aplikacij"</string>
 </resources>
