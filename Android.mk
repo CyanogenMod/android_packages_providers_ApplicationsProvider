@@ -9,6 +9,7 @@ LOCAL_JAVA_LIBRARIES := ext guava
 
 LOCAL_PACKAGE_NAME := ApplicationsProvider
 LOCAL_CERTIFICATE := shared
+LOCAL_PRIVILEGED_MODULE := true
 
 include $(BUILD_PACKAGE)
 
