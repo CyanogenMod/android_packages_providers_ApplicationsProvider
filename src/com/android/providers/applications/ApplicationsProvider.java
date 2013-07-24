@@ -42,6 +42,7 @@ import android.database.DatabaseUtils;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
+import android.os.CancellationSignal;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -238,13 +239,12 @@ public class ApplicationsProvider extends ContentProvider {
     // END ASYC UPDATE CODE
     // ----------
 
-
     /**
      * Creates an in-memory database for storing application info.
      */
     private void createDatabase() {
         mDb = SQLiteDatabase.create(null);
-        mDb.execSQL("CREATE TABLE IF NOT EXISTS " + APPLICATIONS_TABLE + " ("+
+        mDb.execSQL("CREATE TABLE IF NOT EXISTS " + APPLICATIONS_TABLE + " (" +
                 _ID + " INTEGER PRIMARY KEY AUTOINCREMENT," +
                 NAME + " TEXT COLLATE LOCALIZED," +
                 DESCRIPTION + " description TEXT," +
@@ -272,13 +272,13 @@ public class ApplicationsProvider extends ContentProvider {
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
                 "DELETE FROM applicationsLookup WHERE source = new." + _ID + ";" +
-                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
-                "END");
+                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);"
+                + "END");
         mDb.execSQL("CREATE TRIGGER applicationsLookup_insert AFTER INSERT ON " +
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
-                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);" +
-                "END");
+                "SELECT _TOKENIZE('applicationsLookup', new." + _ID + ", new." + NAME + ", ' ', 1);"
+                + "END");
         mDb.execSQL("CREATE TRIGGER applicationsLookup_delete DELETE ON " +
                 APPLICATIONS_TABLE + " " +
                 "BEGIN " +
@@ -304,13 +304,19 @@ public class ApplicationsProvider extends ContentProvider {
         }
     }
 
+    @Override
+    public Cursor query(Uri uri, String[] projectionIn, String selection,
+            String[] selectionArgs, String sortOrder) {
+        return query(uri, projectionIn, selection, selectionArgs, sortOrder, null);
+    }
+
     /**
      * Queries for a given search term and returns a cursor containing
      * suggestions ordered by best match.
      */
     @Override
     public Cursor query(Uri uri, String[] projectionIn, String selection,
-            String[] selectionArgs, String sortOrder) {
+            String[] selectionArgs, String sortOrder, CancellationSignal cancellationSignal) {
         if (DBG) Log.d(TAG, "query(" + uri + ")");
 
         if (!TextUtils.isEmpty(selection)) {
@@ -332,7 +338,7 @@ public class ApplicationsProvider extends ContentProvider {
                 if (uri.getQueryParameter(REFRESH_STATS) != null) {
                     updateUsageStats();
                 }
-                return getSuggestions(query, projectionIn);
+                return getSuggestions(query, projectionIn, cancellationSignal);
             }
             case SHORTCUT_REFRESH: {
                 String shortcutId = null;
@@ -346,14 +352,15 @@ public class ApplicationsProvider extends ContentProvider {
                 if (uri.getPathSegments().size() > 1) {
                     query = uri.getLastPathSegment().toLowerCase();
                 }
-                return getSearchResults(query, projectionIn);
+                return getSearchResults(query, projectionIn, cancellationSignal);
             }
             default:
                 throw new IllegalArgumentException("URL " + uri + " doesn't support querying.");
         }
     }
 
-    private Cursor getSuggestions(String query, String[] projectionIn) {
+    private Cursor getSuggestions(String query, String[] projectionIn,
+            CancellationSignal cancellationSignal) {
         Map<String, String> projectionMap = sSearchSuggestionsProjectionMap;
         // No zero-query suggestions or launch times except for global search,
         // to avoid leaking info about apps that have been used.
@@ -362,7 +369,7 @@ public class ApplicationsProvider extends ContentProvider {
         } else if (TextUtils.isEmpty(query)) {
             return null;
         }
-        return searchApplications(query, projectionIn, projectionMap);
+        return searchApplications(query, projectionIn, projectionMap, cancellationSignal);
     }
 
     /**
@@ -386,12 +393,13 @@ public class ApplicationsProvider extends ContentProvider {
         return cursor;
     }
 
-    private Cursor getSearchResults(String query, String[] projectionIn) {
-        return searchApplications(query, projectionIn, sSearchProjectionMap);
+    private Cursor getSearchResults(String query, String[] projectionIn,
+            CancellationSignal cancellationSignal) {
+        return searchApplications(query, projectionIn, sSearchProjectionMap, cancellationSignal);
     }
 
     private Cursor searchApplications(String query, String[] projectionIn,
-            Map<String, String> columnMap) {
+            Map<String, String> columnMap, CancellationSignal cancelationSignal) {
         final boolean zeroQuery = TextUtils.isEmpty(query);
         SQLiteQueryBuilder qb = new SQLiteQueryBuilder();
         qb.setTables(APPLICATIONS_LOOKUP_JOIN);
@@ -409,7 +417,8 @@ public class ApplicationsProvider extends ContentProvider {
         }
         // don't return duplicates when there are two matching tokens for an app
         String groupBy = APPLICATIONS_TABLE + "." + _ID;
-        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, orderBy);
+        Cursor cursor = qb.query(mDb, projectionIn, null, null, groupBy, null, orderBy, null,
+                cancelationSignal);
         if (DBG) Log.d(TAG, "Returning " + cursor.getCount() + " results for " + query);
         return cursor;
     }
@@ -604,7 +613,6 @@ public class ApplicationsProvider extends ContentProvider {
         } else {
             mDb.delete(APPLICATIONS_TABLE, PACKAGE + " = ?", new String[] { packageName });
         }
-
     }
 
     @Override
@@ -691,5 +699,4 @@ public class ApplicationsProvider extends ContentProvider {
         return (PackageManager.PERMISSION_GRANTED ==
                 getContext().checkCallingPermission(android.Manifest.permission.GLOBAL_SEARCH));
     }
-
 }
